@@ -25,18 +25,28 @@ export interface APIResponse<T = any> {
 
 export const featureFlags = {
   isFeatureEnabled: (feature: string): boolean => {
-    // Mock feature flags - enable all AI features for testing
-    const enabledFeatures = [
+    // Check environment variables first, then fall back to default enabled features
+    const envKey = feature.toUpperCase();
+    const envValue = process.env[envKey];
+    
+    if (envValue !== undefined) {
+      return envValue.toLowerCase() === 'true';
+    }
+    
+    // Default enabled features for testing
+    const defaultEnabledFeatures = [
       'enableAI',
       'enableAICategories', 
       'enableAITaxDeduction',
       'enableAIInsights',
       'enableAILearning'
     ];
-    return enabledFeatures.indexOf(feature) !== -1;
+    
+    return defaultEnabledFeatures.includes(feature);
   },
 
   isAIEnabled: (): boolean => {
-    return true; // Always enabled for testing
+    return process.env.ENABLE_AI?.toLowerCase() === 'true' || 
+           process.env.ENABLE_AI === undefined; // Default to enabled
   }
 };

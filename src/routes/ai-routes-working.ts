@@ -112,10 +112,34 @@ router.get('/categories', (req: any, res: any) => {
   }
 });
 
+// Input validation middleware
+const validateInput = (req: any, res: any, next: any) => {
+  const { body } = req;
+  
+  if (!body || typeof body !== 'object') {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid request body',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  next();
+};
+
 // 🧠 AI ORCHESTRATOR ENDPOINTS  
-router.post('/orchestrate', (req: any, res: any) => {
+router.post('/orchestrate', validateInput, (req: any, res: any) => {
   try {
     const { type, data, agents, userId = 'default-user' } = req.body;
+    
+    // Validate required fields
+    if (!type || !data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: type, data',
+        timestamp: new Date().toISOString()
+      });
+    }
     const config = getAIConfig();
     
     if (!config.apiKey) {
@@ -157,9 +181,18 @@ router.post('/orchestrate', (req: any, res: any) => {
 });
 
 // 💼 TAX DEDUCTION ENDPOINTS
-router.post('/tax-analysis', (req: any, res: any) => {
+router.post('/tax-analysis', validateInput, (req: any, res: any) => {
   try {
     const { transaction, business_context } = req.body;
+    
+    // Validate required fields
+    if (!transaction || !transaction.amount || !transaction.description) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required transaction fields: amount, description',
+        timestamp: new Date().toISOString()
+      });
+    }
     const config = getAIConfig();
     
     if (!config.apiKey) {
@@ -252,9 +285,18 @@ router.get('/insights', (req: any, res: any) => {
 });
 
 // 🎯 LEARNING ENDPOINTS
-router.post('/feedback', (req: any, res: any) => {
+router.post('/feedback', validateInput, (req: any, res: any) => {
   try {
     const { transaction_id, user_correction, feedback_type } = req.body;
+    
+    // Validate required fields
+    if (!transaction_id || !user_correction || !feedback_type) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: transaction_id, user_correction, feedback_type',
+        timestamp: new Date().toISOString()
+      });
+    }
     const config = getAIConfig();
     
     if (!config.apiKey) {
