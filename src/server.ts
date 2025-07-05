@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { featureFlags } from '@ai2/shared';
+import { featureFlags } from './shared-mock';
 
 const app = express();
 const PORT = process.env.AI_PORT || 3002;

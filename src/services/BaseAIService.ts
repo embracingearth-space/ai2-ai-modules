@@ -3,7 +3,7 @@ import {
   User, 
   APIResponse, 
   featureFlags 
-} from '@ai2/shared';
+} from '../shared-mock';
 
 export interface AIConfig {
   provider: string;
