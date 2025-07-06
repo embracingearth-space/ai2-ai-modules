@@ -34,6 +34,63 @@ export class TaxDeductionAIService extends BaseAIService {
     this.openai = new OpenAI({
       apiKey: config.apiKey,
     });
+    
+    // Define capabilities for the tax deduction agent
+    this.capabilities = [
+      {
+        name: 'analyzeTaxDeductibility',
+        description: 'Analyze expense/bill for tax deductibility',
+        inputSchema: {
+          description: 'string',
+          amount: 'number',
+          date: 'Date',
+          category: 'string',
+          userProfile: 'UserTaxProfile',
+          expenseType: 'expense|bill'
+        },
+        outputSchema: {
+          isTaxDeductible: 'boolean',
+          confidence: 'number',
+          reasoning: 'string',
+          businessUsePercentage: 'number',
+          category: 'string',
+          taxCategory: 'string',
+          documentationRequired: 'Array<string>',
+          warnings: 'Array<string>',
+          suggestions: 'Array<string>',
+          relatedRules: 'Array<string>'
+        },
+        costEstimate: 0.08
+      },
+      {
+        name: 'batchAnalyzeTaxDeductibility',
+        description: 'Batch analyze multiple expenses/bills for tax deductibility',
+        inputSchema: {
+          items: 'Array<Transaction>',
+          userProfile: 'UserTaxProfile'
+        },
+        outputSchema: {
+          results: 'Map<string, TaxDeductionAnalysis>'
+        },
+        costEstimate: 0.05
+      },
+      {
+        name: 'getTaxOptimizationSuggestions',
+        description: 'Get tax optimization suggestions for user',
+        inputSchema: {
+          expenses: 'Array<Transaction>',
+          bills: 'Array<Transaction>',
+          userProfile: 'UserTaxProfile'
+        },
+        outputSchema: {
+          missedDeductions: 'Array<string>',
+          optimizationTips: 'Array<string>',
+          planningAdvice: 'Array<string>',
+          riskWarnings: 'Array<string>'
+        },
+        costEstimate: 0.12
+      }
+    ];
   }
 
   /**
@@ -382,47 +439,183 @@ Respond in JSON format:
   }
 
   // Required method implementations from BaseAIService
-  async executeTask(task: any): Promise<any> {
-    throw new Error('Method not implemented.');
+  async executeTask(task: any, context: any): Promise<any> {
+    const startTime = Date.now();
+    let success = false;
+    let cost = 0;
+
+    try {
+      let result;
+      
+      switch (task.taskType) {
+        case 'analyzeTaxDeductibility':
+          result = await this.analyzeTaxDeductibility(
+            task.data.description,
+            task.data.amount,
+            task.data.date,
+            task.data.category,
+            task.data.userProfile,
+            task.data.expenseType
+          );
+          break;
+        case 'batchAnalyzeTaxDeductibility':
+          result = await this.batchAnalyzeTaxDeductibility(task.data.items, task.data.userProfile);
+          break;
+        case 'getTaxOptimizationSuggestions':
+          result = await this.getTaxOptimizationSuggestions(task.data.expenses, task.data.bills, task.data.userProfile);
+          break;
+        default:
+          throw new Error(`Unknown task type: ${task.taskType}`);
+      }
+
+      success = true;
+      cost = await this.estimateTaskCost(task.taskType, task.data);
+      return result;
+
+    } catch (error) {
+      throw error;
+    } finally {
+      const executionTime = Date.now() - startTime;
+      this.updateMetrics(executionTime, success, cost);
+    }
   }
 
-  async batchExecuteTasks(tasks: any[]): Promise<Map<string, any>> {
-    throw new Error('Method not implemented.');
+  async batchExecuteTasks(tasks: any[], context: any): Promise<Map<string, any>> {
+    const results = new Map<string, any>();
+    
+    for (const task of tasks) {
+      try {
+        const result = await this.executeTask(task, context);
+        results.set(task.id, result);
+      } catch (error) {
+        results.set(task.id, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return results;
   }
 
-  async estimateTaskCost(task: any): Promise<number> {
-    throw new Error('Method not implemented.');
+  async estimateTaskCost(taskType: string, data: any): Promise<number> {
+    const baseCosts = {
+      'analyzeTaxDeductibility': 0.08,
+      'batchAnalyzeTaxDeductibility': 0.05,
+      'getTaxOptimizationSuggestions': 0.12
+    };
+
+    const baseCost = baseCosts[taskType as keyof typeof baseCosts] || 0.08;
+    
+    // Adjust cost based on data complexity
+    let complexity = 1;
+    if (data.items && Array.isArray(data.items)) {
+      complexity = Math.max(1, Math.log10(data.items.length + 1));
+    }
+    
+    return baseCost * complexity;
   }
 
   async optimizeForCost(tasks: any[]): Promise<any[]> {
-    throw new Error('Method not implemented.');
+    return tasks.sort((a, b) => b.priority - a.priority);
   }
 
-  async analyzeTransaction(): Promise<any> {
-    throw new Error('Use analyzeTaxDeductibility instead');
+  async analyzeTransaction(
+    description: string,
+    amount: number,
+    date: Date,
+    context?: string
+  ): Promise<any> {
+    // Delegate to analyzeTaxDeductibility with default profile
+    const defaultProfile = {
+      countryCode: this.config.countryCode,
+      occupation: 'General',
+      businessType: 'Individual',
+      industry: 'General',
+      taxResidency: 'Resident',
+      commonDeductions: [],
+      excludedCategories: []
+    };
+    
+    return await this.analyzeTaxDeductibility(description, amount, date, 'General', defaultProfile);
   }
 
-  async analyzeCSVFormat(): Promise<any> {
-    throw new Error('Not implemented in TaxDeductionAIService');
+  async analyzeCSVFormat(csvContent: string, sampleRows: number): Promise<any> {
+    // Tax service doesn't handle CSV analysis
+    return {
+      format: 'unknown',
+      confidence: 0,
+      columns: {},
+      sampleData: [],
+      suggestions: ['Tax analysis service does not process CSV files']
+    };
   }
 
-  async queryTransactions(): Promise<any> {
-    throw new Error('Not implemented in TaxDeductionAIService');
+  async queryTransactions(query: string, transactions: any[], context?: string): Promise<any> {
+    // Tax service doesn't handle transaction queries
+    return {
+      answer: 'Tax analysis service does not process transaction queries',
+      confidence: 0,
+      sources: [],
+      suggestions: ['Use OpenAI service for transaction queries'],
+      relatedTransactions: []
+    };
   }
 
-  async generateUserProfile(): Promise<any> {
-    throw new Error('Not implemented in TaxDeductionAIService');
+  async generateUserProfile(transactions: any[], userPreferences?: any): Promise<any> {
+    // Generate basic tax profile from transactions
+    const expenseCategories = [...new Set(transactions.map(t => t.category).filter(Boolean))];
+    const businessExpenses = transactions.filter(t => t.amount < 0 && t.category?.includes('Business'));
+    
+    return {
+      businessType: businessExpenses.length > 10 ? 'Business' : 'Individual',
+      industry: 'General',
+      commonExpenses: expenseCategories,
+      incomeSources: ['Salary'],
+      taxPreferences: ['Standard Deduction'],
+      learningPreferences: ['Tax Optimization']
+    };
   }
 
-  async learnFromFeedback(): Promise<void> {
+  async learnFromFeedback(feedback: any): Promise<void> {
     // Implementation for learning from user corrections
+    console.log('Tax service received feedback:', feedback);
   }
 
-  async getInsights(): Promise<any> {
-    throw new Error('Use getTaxOptimizationSuggestions instead');
+  async getInsights(transactions: any[], timeframe: string): Promise<any> {
+    // Use getTaxOptimizationSuggestions for insights
+    const expenses = transactions.filter(t => t.amount < 0);
+    const bills = transactions.filter(t => t.recurring === true);
+    
+    const defaultProfile = {
+      countryCode: this.config.countryCode,
+      occupation: 'General',
+      businessType: 'Individual',
+      industry: 'General',
+      taxResidency: 'Resident',
+      commonDeductions: [],
+      excludedCategories: []
+    };
+    
+    const suggestions = await this.getTaxOptimizationSuggestions(expenses, bills, defaultProfile);
+    
+    return {
+      spendingPatterns: ['Tax-focused analysis'],
+      taxOpportunities: suggestions.missedDeductions,
+      recommendations: suggestions.optimizationTips,
+      anomalies: suggestions.riskWarnings
+    };
   }
 
   async exportAIData(): Promise<any> {
-    throw new Error('Not implemented in TaxDeductionAIService');
+    return {
+      userProfile: {
+        businessType: 'Individual',
+        industry: 'General',
+        commonExpenses: [],
+        incomeSources: [],
+        taxPreferences: [],
+        learningPreferences: []
+      },
+      learningData: [],
+      insights: []
+    };
   }
 } 
