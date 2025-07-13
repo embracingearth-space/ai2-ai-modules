@@ -35,6 +35,9 @@ const initializeServices = () => {
   };
 };
 
+// Cache services instance
+let servicesInstance: ReturnType<typeof initializeServices> | null = null;
+
 // Middleware to check AI services availability
 const checkAIServices = (req: any, res: any, next: any) => {
   const services = initializeServices();
@@ -332,6 +335,126 @@ router.post('/feedback', validateInput, (req: any, res: any) => {
     });
   }
 });
+
+// 🔧 ORCHESTRATION ENDPOINT - Comprehensive transaction analysis workflow
+router.post('/orchestrate', validateInput, async (req: any, res: any) => {
+  try {
+    const { workflow, userId, data } = req.body;
+    
+    if (!workflow || !userId || !data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: workflow, userId, data',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Initialize services if not already done
+    if (!servicesInstance) {
+      servicesInstance = initializeServices();
+    }
+
+    if (!servicesInstance) {
+      // Return intelligent mock response that matches expected structure
+      const mockAnalysis = generateMockOrchestrationResponse(workflow, data);
+      return res.json({
+        success: true,
+        mock: true,
+        ...mockAnalysis,
+        message: '🚨 MOCK RESPONSE: Configure OPENAI_API_KEY for real AI analysis',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const { orchestrator } = servicesInstance;
+
+    // Execute the workflow synchronously to get immediate results
+    const result = await orchestrator.executeWorkflowSync(workflow, userId, data);
+
+    res.json({
+      success: true,
+      data: result,
+      workflow,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error: any) {
+    console.error('Orchestration error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Orchestration failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Helper function to generate mock orchestration response
+function generateMockOrchestrationResponse(workflow: string, data: any) {
+  if (workflow === 'fullTransactionAnalysis' && data.transactions) {
+    const transactions = data.transactions || [];
+    const totalAmount = transactions.reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);
+    
+    // Generate realistic-looking mock results
+    const categorization = new Map();
+    const categories = ['Food & Dining', 'Transportation', 'Utilities', 'Shopping', 'Healthcare', 'Entertainment', 'Services'];
+    
+    transactions.forEach((tx: any) => {
+      const category = categories[Math.floor(Math.random() * categories.length)];
+      const isDeductible = Math.random() > 0.6;
+      const confidence = 0.7 + Math.random() * 0.3;
+      
+      categorization.set(tx.id, {
+        category,
+        confidence,
+        reasoning: `MOCK: Categorized based on description "${tx.description}"`,
+        isTaxDeductible: isDeductible,
+        businessUsePercentage: isDeductible ? (Math.random() > 0.5 ? 100 : 50) : 0,
+        incomeClassification: tx.amount > 0 ? 'Income' : 'Expense',
+        transactionNature: Math.random() > 0.7 ? 'BILL' : 'ONE_TIME_EXPENSE',
+        recurring: Math.random() > 0.8,
+        recurrencePattern: Math.random() > 0.5 ? 'MONTHLY' : 'ADHOC',
+        amount: tx.amount,
+        documentationRequired: isDeductible ? ['Receipt', 'Business purpose documentation'] : []
+      });
+    });
+
+    // Generate bill patterns
+    const billPatterns = transactions
+      .filter(() => Math.random() > 0.8)
+      .slice(0, 3)
+      .map((tx: any) => ({
+        suggestedBillName: tx.description.split(' ')[0] + ' Bill',
+        confidence: 0.75 + Math.random() * 0.2,
+        pattern: {
+          frequency: 'monthly',
+          averageAmount: Math.abs(tx.amount),
+          merchantPattern: tx.description
+        },
+        transactions: [tx]
+      }));
+
+    return {
+      categorization: Array.from(categorization.entries()),
+      billsAnalysis: {
+        billCreationRecommendations: billPatterns,
+        linkingRecommendations: [],
+        recurringPatterns: billPatterns.map((p: any) => p.pattern),
+        insights: {
+          totalAnalyzed: transactions.length,
+          recurringDetected: billPatterns.length,
+          confidence: 0.85
+        }
+      },
+      source: 'mock-orchestrator'
+    };
+  }
+
+  return {
+    error: 'Unknown workflow',
+    mock: true
+  };
+}
 
 // Enhanced health check for AI services
 router.get('/health-detailed', (req: any, res: any) => {

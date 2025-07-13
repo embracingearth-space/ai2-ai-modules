@@ -653,4 +653,57 @@ export class AIOrchestrator {
   getTask(taskId: string): OrchestratorTask | undefined {
     return this.taskQueue.find(task => task.id === taskId);
   }
+
+  /**
+   * Execute workflow synchronously and return results immediately
+   * This is used for API endpoints that need immediate results
+   */
+  async executeWorkflowSync(workflowName: string, userId: string, data: any): Promise<any> {
+    const workflow = this.workflows.get(workflowName);
+    
+    if (!workflow) {
+      throw new Error(`Workflow '${workflowName}' not found`);
+    }
+
+    logger.info(`🔄 Executing workflow synchronously: ${workflowName} for user: ${userId}`);
+
+    const task: OrchestratorTask = {
+      id: `wf-sync-${Date.now()}`,
+      type: 'workflow',
+      userId,
+      priority: 10,
+      workflow: {
+        steps: workflow.steps.map((step, index) => ({
+          id: `step-${index}`,
+          agentType: step.agentType,
+          taskType: step.taskType,
+          data: data.data || data, // Handle wrapped data structure
+          priority: 10 - index,
+          config: {},
+          status: 'pending',
+          createdAt: new Date()
+        })),
+        dependencies: workflow.steps.reduce((deps, step, index) => {
+          if (step.dependsOn) {
+            deps[`step-${index}`] = step.dependsOn.map(dep => 
+              `step-${workflow.steps.findIndex(s => s.taskType === dep)}`
+            );
+          }
+          return deps;
+        }, {} as Record<string, string[]>),
+        parallel: workflow.steps.some(s => s.parallel)
+      },
+      data,
+      status: 'pending',
+      createdAt: new Date()
+    };
+
+    // Execute the workflow task immediately (synchronously)
+    const context = await this.buildAIDataContext(userId);
+    const result = await this.executeWorkflowTasks(task, context);
+
+    logger.info(`✅ Workflow ${workflowName} completed synchronously for user ${userId}`);
+
+    return result;
+  }
 } 
