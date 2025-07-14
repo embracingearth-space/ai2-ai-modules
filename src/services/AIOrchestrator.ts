@@ -653,60 +653,127 @@ export class AIOrchestrator {
   }
 
   /**
-   * Execute workflow synchronously and return results immediately
-   * This is used for API endpoints that need immediate results
+   * Execute workflow synchronously (for immediate results)
    */
   async executeWorkflowSync(workflowName: string, userId: string, data: any): Promise<any> {
     try {
       const workflow = this.workflows.get(workflowName);
-      
       if (!workflow) {
-        throw new Error(`Workflow '${workflowName}' not found`);
+        throw new Error(`Workflow not found: ${workflowName}`);
       }
 
-      logger.info(`🔄 Executing workflow synchronously: ${workflowName} for user: ${userId}`);
+      // ✅ VALIDATION: Validate transaction data for transaction analysis workflows
+      if (workflowName === 'fullTransactionAnalysis' && data?.transactions) {
+        const validatedTransactions = this.validateTransactionData(data.transactions);
+        if (validatedTransactions.length === 0) {
+          throw new Error('No valid transactions found in the data');
+        }
+        data.transactions = validatedTransactions;
+      }
 
-      const task: OrchestratorTask = {
-        id: `wf-sync-${Date.now()}`,
-        type: 'workflow',
-        userId,
-        priority: 10,
-        workflow: {
-          steps: workflow.steps.map((step, index) => ({
-            id: `step-${index}`,
-            agentType: step.agentType,
-            taskType: step.taskType,
-            data: data.data || data, // Handle wrapped data structure
-            priority: 10 - index,
-            config: {},
-            status: 'pending',
-            createdAt: new Date()
-          })),
-          dependencies: workflow.steps.reduce((deps, step, index) => {
-            if (step.dependsOn) {
-              deps[`step-${index}`] = step.dependsOn.map(dep => 
-                `step-${workflow.steps.findIndex(s => s.taskType === dep)}`
-              );
-            }
-            return deps;
-          }, {} as Record<string, string[]>),
-          parallel: workflow.steps.some(s => s.parallel)
-        },
-        data,
-        status: 'pending',
-        createdAt: new Date()
-      };
-
-      // Execute the workflow task immediately (synchronously)
       const context = await this.buildAIDataContext(userId);
-      const result = await this.executeWorkflowTasks(task, context);
+      const workflowTasks = workflow.steps.map((step, index) => ({
+        id: `${workflowName}-${index}-${Date.now()}`,
+        agentType: step.agentType,
+        taskType: step.taskType,
+        priority: step.required ? 10 : 5,
+        data,
+        status: 'pending' as const,
+        createdAt: new Date()
+      }));
 
-      logger.info(`✅ Workflow ${workflowName} completed synchronously for user ${userId}`);
-
-      return result;
-    } catch (error: any) {
-      logger.error(`❌ executeWorkflowSync failed for ${workflowName}:`, error);
-      throw new Error(`Workflow execution failed: ${error?.message || 'Unknown error'}`);
+      const results = await this.executeWorkflowTasksSync(workflowTasks, context);
+      
+      // Aggregate results from all tasks
+      const aggregatedResults = this.aggregateWorkflowResults(results);
+      
+      return aggregatedResults;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : 'No stack trace available';
+      
+      console.error('❌ executeWorkflowSync failed for ' + workflowName, {
+        error: errorMessage,
+        stack: errorStack
+      });
+      throw error;
     }
+  }
+
+  /**
+   * Execute workflow tasks synchronously for immediate results
+   */
+  private async executeWorkflowTasksSync(workflowTasks: AIAgentTask[], context: AIDataContext): Promise<any> {
+    const results: any = {};
+    
+    for (const task of workflowTasks) {
+      const agent = this.agents.get(task.agentType);
+      if (!agent) {
+        console.warn(`Agent not found: ${task.agentType}`);
+        continue;
+      }
+
+      try {
+        const result = await agent.agent.executeTask(task, context);
+        results[task.taskType] = result;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Task ${task.taskType} failed: ${errorMessage}`);
+        results[task.taskType] = { error: errorMessage };
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * Validate transaction data to prevent processing errors
+   */
+  private validateTransactionData(transactions: any[]): any[] {
+    if (!Array.isArray(transactions)) {
+      console.warn('⚠️ AIOrchestrator: transactions is not an array:', transactions);
+      return [];
+    }
+
+    const validTransactions = transactions.filter((transaction, index) => {
+      // Check if transaction is an object
+      if (!transaction || typeof transaction !== 'object') {
+        console.warn(`⚠️ AIOrchestrator: Invalid transaction at index ${index}:`, transaction);
+        return false;
+      }
+
+      // Check required fields
+      const { description, amount, merchant, id } = transaction;
+      
+      // At least one of description or merchant must be present
+      if (!description && !merchant) {
+        console.warn(`⚠️ AIOrchestrator: Transaction ${id || index} missing both description and merchant:`, transaction);
+        return false;
+      }
+
+      // Amount should be a number
+      if (amount !== undefined && typeof amount !== 'number') {
+        console.warn(`⚠️ AIOrchestrator: Transaction ${id || index} has invalid amount:`, transaction);
+        return false;
+      }
+
+      return true;
+    });
+
+    console.log(`✅ AIOrchestrator: Validated ${validTransactions.length}/${transactions.length} transactions`);
+    return validTransactions;
+  }
+
+  /**
+   * Aggregate results from multiple workflow tasks.
+   * This is a placeholder and needs to be implemented based on how results are structured.
+   * For now, it just returns the results as is.
+   */
+  private aggregateWorkflowResults(results: any): any {
+    // This method needs to be implemented based on how the workflow results are structured.
+    // For example, if the workflow is 'fullTransactionAnalysis', you might want to combine
+    // categorized transactions, classified transactions, and tax deductions.
+    // For now, it just returns the raw results.
+    return results;
   }
 } 

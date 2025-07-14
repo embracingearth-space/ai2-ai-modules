@@ -248,10 +248,42 @@ export class CategoriesAIAgent extends BaseAIService {
    * Categorize a single transaction
    */
   async categorizeTransaction(transactionData: any): Promise<CategoryAnalysis> {
+    // ✅ VALIDATION: Ensure transaction data has required fields
+    if (!transactionData || typeof transactionData !== 'object') {
+      console.warn('⚠️ CategoriesAIAgent: Invalid transaction data provided:', transactionData);
+      return {
+        suggestedCategory: 'Unknown',
+        confidence: 0.30,
+        reasoning: 'Transaction data is missing or invalid',
+        alternativeCategories: ['General Business', 'Personal', 'Other'],
+        isNewCategory: false,
+        categoryType: 'expense',
+        categoryDescription: 'Unknown transaction type due to invalid data'
+      };
+    }
+
     const { description, amount, type, merchant, date } = transactionData;
     
+    // ✅ VALIDATION: Ensure required fields are present
+    if (!description && !merchant) {
+      console.warn('⚠️ CategoriesAIAgent: Missing description and merchant:', transactionData);
+      return {
+        suggestedCategory: 'Unknown',
+        confidence: 0.30,
+        reasoning: 'Both description and merchant are missing - unable to categorize',
+        alternativeCategories: ['General Business', 'Personal', 'Other'],
+        isNewCategory: false,
+        categoryType: 'expense',
+        categoryDescription: 'Unknown transaction type due to missing key fields'
+      };
+    }
+
+    // Use merchant as fallback if description is missing
+    const effectiveDescription = description || merchant || 'Unknown Transaction';
+    const effectiveAmount = typeof amount === 'number' ? amount : 0;
+    
     // Smart categorization logic
-    const category = this.smartCategorizeTransaction(description, amount, merchant);
+    const category = this.smartCategorizeTransaction(effectiveDescription, effectiveAmount, merchant);
     
     return {
       suggestedCategory: category.name,
@@ -268,6 +300,19 @@ export class CategoriesAIAgent extends BaseAIService {
    * Smart categorization logic
    */
   private smartCategorizeTransaction(description: string, amount: number, merchant?: string): any {
+    // ✅ VALIDATION: Ensure description is not null/undefined
+    if (!description || typeof description !== 'string') {
+      console.warn('⚠️ CategoriesAIAgent: Invalid description provided:', description);
+      return {
+        name: 'Unknown',
+        confidence: 0.30,
+        reasoning: 'Description is missing or invalid - unable to categorize accurately',
+        alternatives: ['General Business', 'Personal', 'Other'],
+        type: 'expense',
+        description: 'Unknown transaction type due to missing description'
+      };
+    }
+
     const descLower = description.toLowerCase();
     
     // Software and subscriptions
