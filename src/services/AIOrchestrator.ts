@@ -449,87 +449,85 @@ export class AIOrchestrator {
    * Execute workflow tasks with dependency management
    */
   private async executeWorkflowTasks(task: OrchestratorTask, context: AIDataContext): Promise<any> {
-    if (!task.workflow) {
-      throw new Error('Workflow definition missing');
-    }
-
-    const { steps, dependencies, parallel } = task.workflow;
-    const results = new Map<string, any>();
-    const completed = new Set<string>();
-    const executing = new Set<string>();
-
-    const executeStep = async (step: AIAgentTask): Promise<void> => {
-      const agent = this.agents.get(step.agentType);
-      if (!agent) {
-        throw new Error(`Agent not found: ${step.agentType}`);
+    try {
+      if (!task.workflow) {
+        throw new Error('Workflow definition missing');
       }
 
-      executing.add(step.id);
+      const { steps, dependencies, parallel } = task.workflow;
+      const results = new Map<string, any>();
+      const completed = new Set<string>();
+      const executing = new Set<string>();
+
+      const executeStep = async (step: AIAgentTask): Promise<void> => {
+        try {
+          logger.info(`📝 Executing step: ${step.taskType} on agent: ${step.agentType}`);
+          
+          const agent = this.agents.get(step.agentType);
+          if (!agent) {
+            throw new Error(`Agent not found: ${step.agentType}`);
+          }
+
+          executing.add(step.id);
+          
+          const result = await agent.agent.executeTask(step, context);
+          results.set(step.id, result);
+          completed.add(step.id);
+          
+          logger.info(`✅ Step completed: ${step.taskType}`);
+        } catch (error: any) {
+          logger.error(`❌ Step failed: ${step.taskType}`, error);
+          throw error;
+        } finally {
+          executing.delete(step.id);
+        }
+      };
+
+      const canExecute = (step: AIAgentTask): boolean => {
+        const deps = dependencies[step.id] || [];
+        return deps.every(dep => completed.has(dep));
+      };
+
+      // Execute steps respecting dependencies
+      let maxIterations = steps.length * 2; // Prevent infinite loops
+      let iterations = 0;
       
-      try {
-        const result = await agent.agent.executeTask(step, context);
-        results.set(step.id, result);
-        completed.add(step.id);
-      } finally {
-        executing.delete(step.id);
-      }
-    };
-
-    const canExecute = (step: AIAgentTask): boolean => {
-      const deps = dependencies[step.id] || [];
-      return deps.every(dep => completed.has(dep));
-    };
-
-    // Execute steps respecting dependencies
-    let maxIterations = steps.length * 2; // Prevent infinite loops
-    let iterations = 0;
-    
-    while (completed.size < steps.length && iterations < maxIterations) {
-      const readySteps = steps.filter(step => 
-        !completed.has(step.id) && 
-        !executing.has(step.id) && 
-        canExecute(step)
-      );
-
-      if (readySteps.length === 0) {
-        // Check for circular dependencies
-        const pendingSteps = steps.filter(step => 
+      while (completed.size < steps.length && iterations < maxIterations) {
+        const readySteps = steps.filter(step => 
           !completed.has(step.id) && 
-          !executing.has(step.id)
+          !executing.has(step.id) && 
+          canExecute(step)
         );
+
+        if (readySteps.length === 0) {
+          // No ready steps, wait for executing steps to complete
+          await new Promise(resolve => setTimeout(resolve, 100));
+          iterations++;
+          continue;
+        }
+
+        // Execute ready steps (potentially in parallel)
+        const stepPromises = readySteps.slice(0, parallel ? 5 : 1).map(executeStep);
         
-        if (pendingSteps.length > 0) {
-          logger.error('Workflow deadlock detected', {
-            pendingSteps: pendingSteps.map(s => s.id),
-            dependencies: Object.fromEntries(
-              Object.entries(dependencies).filter(([stepId]) => 
-                pendingSteps.some(s => s.id === stepId)
-              )
-            )
-          });
-          throw new Error(`Workflow deadlock detected. Pending steps: ${pendingSteps.map(s => s.id).join(', ')}`);
-        }
-        break;
+        await Promise.all(stepPromises);
+        iterations++;
       }
 
-      if (parallel) {
-        // Execute ready steps in parallel
-        await Promise.all(readySteps.map(executeStep));
-      } else {
-        // Execute one step at a time
-        for (const step of readySteps) {
-          await executeStep(step);
-        }
+      if (completed.size < steps.length) {
+        throw new Error(`Workflow execution timed out or deadlocked`);
       }
-      
-      iterations++;
-    }
 
-    if (iterations >= maxIterations) {
-      throw new Error('Workflow execution exceeded maximum iterations - possible circular dependency');
-    }
+      // Return combined results
+      const combinedResults = Array.from(results.entries()).reduce((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+      }, {} as any);
 
-    return Object.fromEntries(results);
+      return combinedResults;
+    } catch (error: any) {
+      logger.error(`❌ executeWorkflowTasks failed:`, error);
+      throw error;
+    }
   }
 
   /**
@@ -659,51 +657,56 @@ export class AIOrchestrator {
    * This is used for API endpoints that need immediate results
    */
   async executeWorkflowSync(workflowName: string, userId: string, data: any): Promise<any> {
-    const workflow = this.workflows.get(workflowName);
-    
-    if (!workflow) {
-      throw new Error(`Workflow '${workflowName}' not found`);
+    try {
+      const workflow = this.workflows.get(workflowName);
+      
+      if (!workflow) {
+        throw new Error(`Workflow '${workflowName}' not found`);
+      }
+
+      logger.info(`🔄 Executing workflow synchronously: ${workflowName} for user: ${userId}`);
+
+      const task: OrchestratorTask = {
+        id: `wf-sync-${Date.now()}`,
+        type: 'workflow',
+        userId,
+        priority: 10,
+        workflow: {
+          steps: workflow.steps.map((step, index) => ({
+            id: `step-${index}`,
+            agentType: step.agentType,
+            taskType: step.taskType,
+            data: data.data || data, // Handle wrapped data structure
+            priority: 10 - index,
+            config: {},
+            status: 'pending',
+            createdAt: new Date()
+          })),
+          dependencies: workflow.steps.reduce((deps, step, index) => {
+            if (step.dependsOn) {
+              deps[`step-${index}`] = step.dependsOn.map(dep => 
+                `step-${workflow.steps.findIndex(s => s.taskType === dep)}`
+              );
+            }
+            return deps;
+          }, {} as Record<string, string[]>),
+          parallel: workflow.steps.some(s => s.parallel)
+        },
+        data,
+        status: 'pending',
+        createdAt: new Date()
+      };
+
+      // Execute the workflow task immediately (synchronously)
+      const context = await this.buildAIDataContext(userId);
+      const result = await this.executeWorkflowTasks(task, context);
+
+      logger.info(`✅ Workflow ${workflowName} completed synchronously for user ${userId}`);
+
+      return result;
+    } catch (error: any) {
+      logger.error(`❌ executeWorkflowSync failed for ${workflowName}:`, error);
+      throw new Error(`Workflow execution failed: ${error?.message || 'Unknown error'}`);
     }
-
-    logger.info(`🔄 Executing workflow synchronously: ${workflowName} for user: ${userId}`);
-
-    const task: OrchestratorTask = {
-      id: `wf-sync-${Date.now()}`,
-      type: 'workflow',
-      userId,
-      priority: 10,
-      workflow: {
-        steps: workflow.steps.map((step, index) => ({
-          id: `step-${index}`,
-          agentType: step.agentType,
-          taskType: step.taskType,
-          data: data.data || data, // Handle wrapped data structure
-          priority: 10 - index,
-          config: {},
-          status: 'pending',
-          createdAt: new Date()
-        })),
-        dependencies: workflow.steps.reduce((deps, step, index) => {
-          if (step.dependsOn) {
-            deps[`step-${index}`] = step.dependsOn.map(dep => 
-              `step-${workflow.steps.findIndex(s => s.taskType === dep)}`
-            );
-          }
-          return deps;
-        }, {} as Record<string, string[]>),
-        parallel: workflow.steps.some(s => s.parallel)
-      },
-      data,
-      status: 'pending',
-      createdAt: new Date()
-    };
-
-    // Execute the workflow task immediately (synchronously)
-    const context = await this.buildAIDataContext(userId);
-    const result = await this.executeWorkflowTasks(task, context);
-
-    logger.info(`✅ Workflow ${workflowName} completed synchronously for user ${userId}`);
-
-    return result;
   }
 } 
