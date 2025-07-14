@@ -730,7 +730,7 @@ Respond in JSON format:
       description: transaction.description,
       amount: transaction.amount,
       merchant: transaction.merchant || 'Unknown',
-      date: transaction.date.toISOString(),
+      date: transaction.date instanceof Date ? transaction.date.toISOString() : transaction.date,
       historicalCount: historicalTransactions.length,
       historicalTransactions: JSON.stringify(historicalTransactions.slice(-20), null, 2)
     });
