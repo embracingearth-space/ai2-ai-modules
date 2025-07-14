@@ -78,19 +78,27 @@ export class CategoriesAIAgent extends BaseAIService {
         case 'analyzeAndCreateCategories':
           result = await this.analyzeAndCreateCategories(task.data.transactions, task.data.business_type);
           break;
+        case 'categorizeTransaction':
+          result = await this.categorizeTransaction(task.data);
+          break;
         default:
           throw new Error(`Unknown task type: ${task.taskType}`);
       }
 
       success = true;
       cost = await this.estimateTaskCost(task.taskType, task.data);
-      return result;
-
+      
+      return {
+        success,
+        data: result,
+        cost,
+        executionTime: Date.now() - startTime,
+        taskType: task.taskType
+      };
+      
     } catch (error) {
+      console.error(`CategoriesAIAgent task failed: ${task.taskType}`, error);
       throw error;
-    } finally {
-      const executionTime = Date.now() - startTime;
-      this.updateMetrics(executionTime, success, cost);
     }
   }
 
@@ -233,6 +241,60 @@ export class CategoriesAIAgent extends BaseAIService {
         }
       ],
       insights: spendingPatterns
+    };
+  }
+
+  /**
+   * Categorize a single transaction
+   */
+  async categorizeTransaction(transactionData: any): Promise<any> {
+    const { description, amount, type, merchant } = transactionData;
+    
+    // Basic categorization logic
+    let category = 'Business Expense';
+    let subcategory = 'General';
+    let confidence = 0.6;
+    let isTaxDeductible = false;
+    let businessUsePercentage = 0;
+    
+    // Simple pattern matching - handle missing description
+    const desc = (description || '').toLowerCase();
+    
+    if (desc.includes('restaurant') || desc.includes('cafe') || desc.includes('food')) {
+      category = 'Food & Dining';
+      subcategory = 'Restaurants';
+      confidence = 0.8;
+      isTaxDeductible = true;
+      businessUsePercentage = 50;
+    } else if (desc.includes('office') || desc.includes('supplies') || desc.includes('staples')) {
+      category = 'Business Expense';
+      subcategory = 'Office Supplies';
+      confidence = 0.9;
+      isTaxDeductible = true;
+      businessUsePercentage = 100;
+    } else if (desc.includes('travel') || desc.includes('hotel') || desc.includes('flight')) {
+      category = 'Travel';
+      subcategory = 'Business Travel';
+      confidence = 0.85;
+      isTaxDeductible = true;
+      businessUsePercentage = 80;
+    } else if (desc.includes('software') || desc.includes('subscription') || desc.includes('saas')) {
+      category = 'Business Expense';
+      subcategory = 'Software';
+      confidence = 0.9;
+      isTaxDeductible = true;
+      businessUsePercentage = 100;
+    }
+    
+    return {
+      category,
+      subcategory,
+      confidence,
+      reasoning: `Categorized based on transaction description: ${description}`,
+      isTaxDeductible,
+      businessUsePercentage,
+      primaryType: type === 'credit' ? 'income' : 'expense',
+      secondaryType: 'general'
     };
   }
 

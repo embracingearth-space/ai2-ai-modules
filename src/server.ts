@@ -21,6 +21,10 @@ app.use(express.json());
 // Mount AI routes
 app.use('/api/ai', aiRoutes);
 
+// Mount simplified AI route
+import aiSimpleRoutes from './routes/ai-simple';
+app.use('/api/simple', aiSimpleRoutes);
+
 // Add direct classify endpoint for backward compatibility
 app.post('/api/classify', async (req, res) => {
   try {

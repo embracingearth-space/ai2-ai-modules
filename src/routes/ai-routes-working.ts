@@ -62,6 +62,7 @@ router.get('/test', (req: any, res: any) => {
     timestamp: new Date().toISOString(),
     available_endpoints: [
       'GET /api/ai/test',
+      'POST /api/ai/classify',        // ⭐ ADDED - Core app expects this
       'GET /api/ai/categories', 
       'POST /api/ai/orchestrate',
       'POST /api/ai/tax-analysis',
@@ -70,6 +71,101 @@ router.get('/test', (req: any, res: any) => {
     ]
   });
 });
+
+/**
+ * Generate mock classification for testing/development
+ */
+function generateMockClassification(description: string, amount: number, type?: string) {
+  const desc = description.toLowerCase();
+  
+  // Smart mock categorization based on description patterns
+  let category = 'Business Expense';
+  let subcategory = 'General';
+  let confidence = 0.6;
+  let isTaxDeductible = false;
+  let businessUsePercentage = 0;
+  
+  // Office & Tech
+  if (desc.includes('office') || desc.includes('computer') || desc.includes('software')) {
+    category = 'Office & Technology';
+    subcategory = 'Equipment';
+    confidence = 0.9;
+    isTaxDeductible = true;
+    businessUsePercentage = 100;
+  }
+  // Food & Dining
+  else if (desc.includes('restaurant') || desc.includes('cafe') || desc.includes('food')) {
+    category = 'Meals & Entertainment';
+    subcategory = 'Business Meals';
+    confidence = 0.8;
+    isTaxDeductible = true;
+    businessUsePercentage = 50; // Australian business meal rule
+  }
+  // Travel
+  else if (desc.includes('uber') || desc.includes('taxi') || desc.includes('fuel') || desc.includes('transport')) {
+    category = 'Travel & Transport';
+    subcategory = 'Business Travel';
+    confidence = 0.85;
+    isTaxDeductible = true;
+    businessUsePercentage = 100;
+  }
+  // Utilities
+  else if (desc.includes('internet') || desc.includes('phone') || desc.includes('electricity')) {
+    category = 'Utilities';
+    subcategory = 'Business Utilities';
+    confidence = 0.75;
+    isTaxDeductible = true;
+    businessUsePercentage = 80; // Home office use
+  }
+  // Income (credit transactions)
+  else if (type === 'credit' || amount > 0) {
+    category = 'Income';
+    subcategory = 'Business Income';
+    confidence = 0.8;
+    isTaxDeductible = false;
+    businessUsePercentage = 0;
+  }
+
+  return {
+    category,
+    subcategory,
+    confidence,
+    reasoning: `[MOCK] Pattern-based classification from: "${description}"`,
+    isTaxDeductible,
+    businessUsePercentage,
+    taxCategory: isTaxDeductible ? 'Business Deduction' : 'Non-deductible',
+    suggestedBillName: generateBillName(description),
+    isRecurring: detectRecurringPattern(description)
+  };
+}
+
+/**
+ * Generate suggested bill name
+ */
+function generateBillName(description: string): string {
+  const desc = description.toLowerCase();
+  
+  if (desc.includes('office')) return 'Office Supplies';
+  if (desc.includes('software') || desc.includes('saas')) return 'Software Subscription';
+  if (desc.includes('internet')) return 'Internet Bill';
+  if (desc.includes('phone')) return 'Phone Bill';
+  if (desc.includes('electricity')) return 'Electricity Bill';
+  if (desc.includes('uber') || desc.includes('taxi')) return 'Transport Expense';
+  
+  // Extract merchant name if possible
+  const words = description.split(' ');
+  const merchant = words.find(word => word.length > 3 && !['the', 'and', 'for', 'with'].includes(word.toLowerCase()));
+  
+  return merchant ? `${merchant} Bill` : 'General Expense';
+}
+
+/**
+ * Detect if transaction is likely recurring
+ */
+function detectRecurringPattern(description: string): boolean {
+  const recurringKeywords = ['subscription', 'monthly', 'annual', 'recurring', 'auto', 'bill', 'plan'];
+  return recurringKeywords.some(keyword => description.toLowerCase().includes(keyword));
+}
 
 // 🔍 CLASSIFICATION ENDPOINTS
 router.get('/categories', (req: any, res: any) => {
@@ -129,6 +225,88 @@ const validateInput = (req: any, res: any, next: any) => {
   
   next();
 };
+
+// 🔥 CRITICAL FIX: Add missing /classify route that core app expects
+/**
+ * 🎯 DIRECT CLASSIFICATION ENDPOINT
+ * 
+ * This endpoint provides basic transaction classification that the core app expects.
+ * Called by: Core app's service discovery when AI modules are available
+ * Expected by: Frontend transaction analysis
+ */
+router.post('/classify', validateInput, async (req: any, res: any) => {
+  try {
+    const { description, amount, type, merchant, date } = req.body;
+    
+    // Validate required fields
+    if (!description || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: description, amount',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const config = getAIConfig();
+    
+    // If no OpenAI API key, return enhanced mock response
+    if (!config.apiKey) {
+      const mockClassification = generateMockClassification(description, amount, type);
+      return res.json({
+        success: true,
+        mock: true,
+        classification: mockClassification,
+        message: '🚨 MOCK RESPONSE: Configure OPENAI_API_KEY for real AI classification',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Use real AI classification with proper service initialization
+    const services = initializeServices();
+    if (!services?.classificationAgent) {
+      throw new Error('Classification service not available');
+    }
+
+    const result = await services.classificationAgent.classifyTransaction(
+      {
+        description, 
+        amount, 
+        merchant,
+        date: new Date(date || new Date().toISOString()),
+        historicalTransactions: []
+      },
+      {
+        userId: 'default-user',
+        userProfile: {
+          businessType: 'SOLE_TRADER',
+          industry: 'Software Development',
+          commonExpenses: [],
+          incomeSources: [],
+          taxPreferences: [],
+          learningPreferences: []
+        },
+        historicalData: [],
+        learningFeedback: [],
+        preferences: {}
+      }
+    );
+
+    res.json({
+      success: true,
+      classification: result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error: any) {
+    console.error('❌ Classification failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Classification failed',
+      message: error?.message || 'Unknown error occurred',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // 🧠 AI ORCHESTRATOR ENDPOINTS  
 // Removed duplicate orchestrate endpoint to avoid conflicts
