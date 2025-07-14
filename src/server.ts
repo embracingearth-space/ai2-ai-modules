@@ -13,10 +13,110 @@ import aiRoutes from './routes/ai-routes-working';
 const app = express();
 const PORT = process.env.AI_PORT || 3002;
 
+// 🔧 CORS Configuration - Match Core App Settings
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001'
+    ];
+    
+    console.log('🔍 AI Modules CORS Check:', { origin, allowedOrigins });
+    
+    // Allow requests with no origin (mobile apps, etc.)
+    if (!origin) {
+      console.log('✅ AI Modules CORS: No origin - allowing');
+      return callback(null, true);
+    }
+    
+    // Handle trailing slashes and normalize origins
+    const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+    const isAllowed = allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin);
+    
+    if (isAllowed) {
+      console.log('✅ AI Modules CORS: Origin allowed -', origin);
+      callback(null, true);
+    } else {
+      console.log('❌ AI Modules CORS: Origin not allowed -', origin);
+      console.log('🔍 Normalized origin:', normalizedOrigin);
+      console.log('🔍 Allowed origins:', allowedOrigins);
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+  maxAge: 86400, // 24 hours
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+};
+
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// 🔥 USER-SPECIFIC ANALYZE ENDPOINT - MUST BE BEFORE OTHER ROUTES
+// This handles requests like /cmd30zpi3000kp9iwwcj0w66b/analyze
+app.post('/:userId/analyze', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { transactions, userProfile, options = {} } = req.body;
+    
+    console.log(`🎯 User-specific analyze request for user: ${userId}`);
+    
+    if (!transactions || !Array.isArray(transactions)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or invalid transactions array',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Process the transactions using the same logic as the simple analyze endpoint
+    const results = [];
+    
+    for (const transaction of transactions) {
+      // Mock analysis for now (replace with real AI when API key is configured)
+      const analysis = {
+        transactionId: transaction.id || `tx-${Date.now()}`,
+        category: 'Business Expense',
+        subcategory: 'Office Supplies',
+        confidence: 0.85,
+        isTaxDeductible: Math.abs(transaction.amount) > 50,
+        businessUsePercentage: Math.abs(transaction.amount) > 100 ? 100 : 50,
+        reasoning: `Analysis for user ${userId}: ${transaction.description}`,
+        primaryType: transaction.amount > 0 ? 'income' : 'expense',
+        processedAt: new Date().toISOString()
+      };
+      
+      results.push(analysis);
+    }
+
+    res.json({
+      success: true,
+      userId,
+      results,
+      summary: {
+        totalProcessed: results.length,
+        avgConfidence: 0.85,
+        categoriesFound: ['Business Expense'],
+        taxDeductibleCount: results.filter(r => r.isTaxDeductible).length
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error: any) {
+    console.error('❌ User-specific analysis failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'User-specific analysis failed',
+      message: error?.message || 'Unknown error occurred',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // Mount AI routes
 app.use('/api/ai', aiRoutes);

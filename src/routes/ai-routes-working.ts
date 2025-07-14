@@ -8,6 +8,19 @@ import { AIConfig } from '../services/BaseAIService';
 
 const router = Router();
 
+// 🏥 HEALTH CHECK ENDPOINT FOR SERVICE DISCOVERY
+router.get('/health', (req: any, res: any) => {
+  const config = getAIConfig();
+  res.json({
+    status: 'online',
+    service: 'ai-modules',
+    features: ['classification', 'orchestration', 'tax-analysis'],
+    version: '1.0.0',
+    apiKeyConfigured: !!config.apiKey,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Initialize AI services
 const getAIConfig = (): AIConfig => ({
   provider: 'openai',
