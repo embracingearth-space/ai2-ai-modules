@@ -25,6 +25,10 @@ app.use('/api/ai', aiRoutes);
 import aiSimpleRoutes from './routes/ai-simple';
 app.use('/api/simple', aiSimpleRoutes);
 
+// Mount optimized batch processing routes
+import aiOptimizedRoutes from './routes/ai-batch-optimized';
+app.use('/api/optimized', aiOptimizedRoutes);
+
 // Add direct classify endpoint for backward compatibility
 app.post('/api/classify', async (req, res) => {
   try {
