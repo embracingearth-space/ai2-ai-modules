@@ -24,7 +24,7 @@ app.use('/api/ai', aiRoutes);
 // Add direct classify endpoint for backward compatibility
 app.post('/api/classify', async (req, res) => {
   try {
-    const { description, amount, type, merchant, category } = req.body;
+    const { description, amount, type, merchant, category, userId } = req.body;
     
     if (!description || amount === undefined) {
       return res.status(400).json({
@@ -34,29 +34,152 @@ app.post('/api/classify', async (req, res) => {
       });
     }
 
-    // Mock classification response for now (until OpenAI is configured)
-    const mockResponse = {
+    // Check if OpenAI API key is configured
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    
+    if (!openaiApiKey) {
+      // Return mock response if no API key configured
+      const mockResponse = {
+        success: true,
+        classification: {
+          category: 'Business Expense',
+          subcategory: 'Office Supplies',
+          confidence: 0.85,
+          reasoning: 'Based on transaction description and amount pattern',
+          isTaxDeductible: amount > 50,
+          businessUsePercentage: amount > 100 ? 100 : 50,
+          primaryType: type === 'credit' ? 'income' : 'expense',
+          secondaryType: description.toLowerCase().includes('bill') || 
+                       description.toLowerCase().includes('subscription') ? 'bill' : 'one-time expense'
+        },
+        timestamp: new Date().toISOString()
+      };
+      return res.json(mockResponse);
+    }
+
+    // Fetch user preferences for enhanced AI classification
+    let userProfile = {
+      businessType: 'Individual',
+      industry: 'General',
+      countryCode: 'AU',
+      profession: 'General'
+    };
+
+    // Try to fetch user preferences from core app if userId is provided
+    if (userId) {
+      try {
+        // Note: In a production system, this would be a secure internal API call
+        const coreAppUrl = process.env.CORE_APP_URL || 'http://localhost:3001';
+        
+        // Fetch country preferences
+        const countryResponse = await fetch(`${coreAppUrl}/api/country/preferences`, {
+          headers: {
+            'Authorization': `Bearer ${req.headers.authorization?.replace('Bearer ', '')}`
+          }
+        });
+        
+        if (countryResponse.ok) {
+          const countryData = await countryResponse.json() as any;
+          if (countryData.success && countryData.preferences) {
+            userProfile.countryCode = countryData.preferences.countryCode || 'AU';
+            userProfile.businessType = countryData.preferences.businessType || 'Individual';
+            userProfile.industry = countryData.preferences.industry || 'General';
+          }
+        }
+
+        // Fetch AI profile  
+        const aiProfileResponse = await fetch(`${coreAppUrl}/api/ai/profile`, {
+          headers: {
+            'Authorization': `Bearer ${req.headers.authorization?.replace('Bearer ', '')}`
+          }
+        });
+        
+        if (aiProfileResponse.ok) {
+          const aiProfileData = await aiProfileResponse.json() as any;
+          if (aiProfileData.profile) {
+            userProfile.profession = aiProfileData.profile.profession || 'General';
+            userProfile.industry = aiProfileData.profile.industry || userProfile.industry;
+            userProfile.businessType = aiProfileData.profile.businessType || userProfile.businessType;
+          }
+        }
+      } catch (error: any) {
+        console.log('Could not fetch user preferences, using defaults:', error.message);
+      }
+    }
+
+    // Use real OpenAI API for classification with user profile context
+    const { TransactionClassificationAIAgent } = await import('./services/TransactionClassificationAIAgent');
+    const config = {
+      provider: 'openai' as const,
+      model: process.env.AI_MODEL || 'gpt-4',
+      apiKey: openaiApiKey,
+      maxTokens: parseInt(process.env.AI_MAX_TOKENS || '2000'),
+      temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+      countryCode: userProfile.countryCode,
+      language: process.env.AI_LANGUAGE || 'en'
+    };
+
+    const classificationAgent = new TransactionClassificationAIAgent(config);
+    const classificationResult = await classificationAgent.classifyTransaction(
+      {
+        description,
+        amount,
+        merchant,
+        date: new Date()
+      },
+      {
+        userId: userId || 'anonymous',
+        userProfile: {
+          businessType: userProfile.businessType,
+          industry: userProfile.industry,
+          commonExpenses: [],
+          incomeSources: [],
+          taxPreferences: [],
+          learningPreferences: []
+        },
+        historicalData: [],
+        learningFeedback: [],
+        preferences: {
+          countryCode: userProfile.countryCode,
+          profession: userProfile.profession
+        }
+      }
+    );
+
+    // Convert AI result to expected format
+    const response = {
       success: true,
       classification: {
-        category: 'Business Expense',
-        subcategory: 'Office Supplies',
-        confidence: 0.85,
-        reasoning: 'Based on transaction description and amount pattern',
-        isTaxDeductible: amount > 50,
-        businessUsePercentage: amount > 100 ? 100 : 50,
+        category: classificationResult.transactionNature || 'Business Expense',
+        subcategory: classificationResult.merchantInfo?.vendorCategory || 'General',
+        confidence: classificationResult.confidence || 0.8,
+        reasoning: classificationResult.reasoning || 'AI-powered classification based on user profile',
+        isTaxDeductible: classificationResult.recurringPattern?.isRecurring ? true : amount > 50,
+        businessUsePercentage: userProfile.businessType !== 'Individual' ? 100 : 50,
         primaryType: type === 'credit' ? 'income' : 'expense',
-        secondaryType: description.toLowerCase().includes('bill') || 
-                     description.toLowerCase().includes('subscription') ? 'bill' : 'one-time expense'
+        secondaryType: classificationResult.classification === 'bill' ? 'bill' : 'one-time expense',
+        // Enhanced fields
+        transactionNature: classificationResult.transactionNature,
+        recurring: classificationResult.recurring,
+        recurrencePattern: classificationResult.recurrencePattern,
+        merchantInfo: classificationResult.merchantInfo,
+        userProfile: {
+          businessType: userProfile.businessType,
+          industry: userProfile.industry,
+          countryCode: userProfile.countryCode,
+          profession: userProfile.profession
+        }
       },
       timestamp: new Date().toISOString()
     };
 
-    res.json(mockResponse);
-  } catch (error) {
+    return res.json(response);
+  } catch (error: any) {
     console.error('Classification error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Classification failed',
+      details: error.message,
       timestamp: new Date().toISOString()
     });
   }
