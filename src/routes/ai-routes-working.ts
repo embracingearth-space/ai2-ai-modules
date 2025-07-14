@@ -131,57 +131,8 @@ const validateInput = (req: any, res: any, next: any) => {
 };
 
 // 🧠 AI ORCHESTRATOR ENDPOINTS  
-router.post('/orchestrate', validateInput, (req: any, res: any) => {
-  try {
-    const { type, data, agents, userId = 'default-user' } = req.body;
-    
-    // Validate required fields
-    if (!type || !data) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: type, data',
-        timestamp: new Date().toISOString()
-      });
-    }
-    const config = getAIConfig();
-    
-    if (!config.apiKey) {
-      return res.status(503).json({
-        success: false,
-        mock: true,
-        data: {
-          workflow_id: 'mock-workflow-123',
-          status: 'completed',
-          result: {
-            classification: 'Business Expense [MOCK]',
-            tax_analysis: 'Deductible [MOCK]',
-            confidence: 0.85,
-            message: '🚨 MOCK ORCHESTRATION: This is simulated multi-agent processing'
-          }
-        },
-        message: '🚨 MOCK RESPONSE: Configure OPENAI_API_KEY for real orchestration',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Real orchestration would happen here
-    res.json({
-      success: true,
-      data: {
-        workflow_id: 'real-workflow-' + Date.now(),
-        status: 'processing',
-        message: 'Real AI orchestration initiated'
-      },
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Orchestration failed',
-      timestamp: new Date().toISOString()
-    });
-  }
-});
+// Removed duplicate orchestrate endpoint to avoid conflicts
+// The main orchestrate endpoint is defined later in the file
 
 // 💼 TAX DEDUCTION ENDPOINTS
 router.post('/tax-analysis', validateInput, (req: any, res: any) => {
@@ -359,8 +310,8 @@ router.post('/orchestrate', validateInput, async (req: any, res: any) => {
       const mockAnalysis = generateMockOrchestrationResponse(workflow, data);
       return res.json({
         success: true,
+        data: mockAnalysis, // Wrap in data field for consistency
         mock: true,
-        ...mockAnalysis,
         message: '🚨 MOCK RESPONSE: Configure OPENAI_API_KEY for real AI analysis',
         timestamp: new Date().toISOString()
       });

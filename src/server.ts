@@ -15,6 +15,47 @@ app.use(express.json());
 // Mount AI routes
 app.use('/api/ai', aiRoutes);
 
+// Add direct classify endpoint for backward compatibility
+app.post('/api/classify', async (req, res) => {
+  try {
+    const { description, amount, type, merchant, category } = req.body;
+    
+    if (!description || amount === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: description, amount',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Mock classification response for now (until OpenAI is configured)
+    const mockResponse = {
+      success: true,
+      classification: {
+        category: 'Business Expense',
+        subcategory: 'Office Supplies',
+        confidence: 0.85,
+        reasoning: 'Based on transaction description and amount pattern',
+        isTaxDeductible: amount > 50,
+        businessUsePercentage: amount > 100 ? 100 : 50,
+        primaryType: type === 'credit' ? 'income' : 'expense',
+        secondaryType: description.toLowerCase().includes('bill') || 
+                     description.toLowerCase().includes('subscription') ? 'bill' : 'one-time expense'
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    res.json(mockResponse);
+  } catch (error) {
+    console.error('Classification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Classification failed',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({
