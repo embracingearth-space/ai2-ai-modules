@@ -583,7 +583,7 @@ export class TransactionClassificationAIAgent extends BaseAIService {
       description: string;
       amount: number;
       merchant?: string;
-      date: Date;
+      date: Date | string; // 🔧 FIXED: Accept both Date objects and ISO strings
       historicalTransactions?: any[];
     },
     context: AIDataContext
@@ -627,7 +627,7 @@ export class TransactionClassificationAIAgent extends BaseAIService {
     if (ruleClassification && ruleClassification.confidence && ruleClassification.confidence > 0.7) {
       // High confidence rule match - use it directly
       const nextDueDate = ruleClassification.recurrencePattern 
-        ? this.calculateNextDueDate(transaction.date, ruleClassification.recurrencePattern)
+        ? this.calculateNextDueDate(transaction.date instanceof Date ? transaction.date : new Date(transaction.date), ruleClassification.recurrencePattern)
         : undefined;
 
       return {
@@ -730,7 +730,7 @@ Respond in JSON format:
       description: transaction.description,
       amount: transaction.amount,
       merchant: transaction.merchant || 'Unknown',
-      date: transaction.date instanceof Date ? transaction.date.toISOString() : transaction.date,
+      date: this.dateToISOString(transaction.date),
       historicalCount: historicalTransactions.length,
       historicalTransactions: JSON.stringify(historicalTransactions.slice(-20), null, 2)
     });

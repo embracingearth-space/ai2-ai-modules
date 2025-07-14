@@ -183,7 +183,7 @@ Respond in JSON format:
       taxResidency: userProfile.taxResidency,
       description,
       amount,
-      date: date instanceof Date ? date.toISOString() : date,
+      date: this.dateToISOString(date),
       category,
       expenseType,
       deductionRules: JSON.stringify(deductionRules, null, 2),

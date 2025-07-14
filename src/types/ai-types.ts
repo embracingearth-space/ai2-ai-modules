@@ -37,7 +37,7 @@ export interface TransactionData {
   id: string;
   description: string;
   amount: number;
-  date: Date;
+  date: Date | string; // 🔧 FIXED: Accept both Date objects and ISO strings
   merchant?: string;
   category?: string;
   subcategory?: string;

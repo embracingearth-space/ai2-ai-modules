@@ -232,6 +232,38 @@ export abstract class BaseAIService {
     return prompt;
   }
 
+  /**
+   * 🔧 CRITICAL FIX: Safely parse date from string or Date object
+   */
+  protected parseDate(date: Date | string | undefined): Date {
+    if (!date) {
+      return new Date();
+    }
+    
+    if (date instanceof Date) {
+      return date;
+    }
+    
+    if (typeof date === 'string') {
+      const parsed = new Date(date);
+      if (isNaN(parsed.getTime())) {
+        console.warn('Invalid date string:', date, 'using current date');
+        return new Date();
+      }
+      return parsed;
+    }
+    
+    console.warn('Invalid date type:', typeof date, 'using current date');
+    return new Date();
+  }
+
+  /**
+   * 🔧 CRITICAL FIX: Safely convert date to ISO string
+   */
+  protected dateToISOString(date: Date | string | undefined): string {
+    return this.parseDate(date).toISOString();
+  }
+
   protected async retryWithBackoff<T>(
     operation: () => Promise<T>,
     maxRetries: number = 3,

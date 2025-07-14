@@ -204,7 +204,7 @@ Respond in JSON format:
       countryCode: this.config.countryCode,
       description,
       amount,
-      date: date instanceof Date ? date.toISOString() : date,
+      date: this.dateToISOString(date),
       context: context || 'No additional context',
       businessTypes: JSON.stringify(businessTypes, null, 2)
     });
