@@ -247,54 +247,85 @@ export class CategoriesAIAgent extends BaseAIService {
   /**
    * Categorize a single transaction
    */
-  async categorizeTransaction(transactionData: any): Promise<any> {
-    const { description, amount, type, merchant } = transactionData;
+  async categorizeTransaction(transactionData: any): Promise<CategoryAnalysis> {
+    const { description, amount, type, merchant, date } = transactionData;
     
-    // Basic categorization logic
-    let category = 'Business Expense';
-    let subcategory = 'General';
-    let confidence = 0.6;
-    let isTaxDeductible = false;
-    let businessUsePercentage = 0;
-    
-    // Simple pattern matching - handle missing description
-    const desc = (description || '').toLowerCase();
-    
-    if (desc.includes('restaurant') || desc.includes('cafe') || desc.includes('food')) {
-      category = 'Food & Dining';
-      subcategory = 'Restaurants';
-      confidence = 0.8;
-      isTaxDeductible = true;
-      businessUsePercentage = 50;
-    } else if (desc.includes('office') || desc.includes('supplies') || desc.includes('staples')) {
-      category = 'Business Expense';
-      subcategory = 'Office Supplies';
-      confidence = 0.9;
-      isTaxDeductible = true;
-      businessUsePercentage = 100;
-    } else if (desc.includes('travel') || desc.includes('hotel') || desc.includes('flight')) {
-      category = 'Travel';
-      subcategory = 'Business Travel';
-      confidence = 0.85;
-      isTaxDeductible = true;
-      businessUsePercentage = 80;
-    } else if (desc.includes('software') || desc.includes('subscription') || desc.includes('saas')) {
-      category = 'Business Expense';
-      subcategory = 'Software';
-      confidence = 0.9;
-      isTaxDeductible = true;
-      businessUsePercentage = 100;
-    }
+    // Smart categorization logic
+    const category = this.smartCategorizeTransaction(description, amount, merchant);
     
     return {
-      category,
-      subcategory,
-      confidence,
-      reasoning: `Categorized based on transaction description: ${description}`,
-      isTaxDeductible,
-      businessUsePercentage,
-      primaryType: type === 'credit' ? 'income' : 'expense',
-      secondaryType: 'general'
+      suggestedCategory: category.name,
+      confidence: category.confidence,
+      reasoning: category.reasoning,
+      alternativeCategories: category.alternatives,
+      isNewCategory: false,
+      categoryType: category.type,
+      categoryDescription: category.description
+    };
+  }
+
+  /**
+   * Smart categorization logic
+   */
+  private smartCategorizeTransaction(description: string, amount: number, merchant?: string): any {
+    const descLower = description.toLowerCase();
+    
+    // Software and subscriptions
+    if (descLower.includes('adobe') || descLower.includes('microsoft') || descLower.includes('software')) {
+      return {
+        name: 'Software',
+        confidence: 0.95,
+        reasoning: 'Software/subscription service detected',
+        alternatives: ['Business Expenses', 'Technology'],
+        type: 'deductible',
+        description: 'Software and digital services'
+      };
+    }
+    
+    // Cloud services
+    if (descLower.includes('aws') || descLower.includes('cloud') || descLower.includes('azure')) {
+      return {
+        name: 'Cloud Services',
+        confidence: 0.95,
+        reasoning: 'Cloud infrastructure service detected',
+        alternatives: ['Software', 'Business Expenses'],
+        type: 'deductible',
+        description: 'Cloud computing and infrastructure'
+      };
+    }
+    
+    // Telecommunications
+    if (descLower.includes('telstra') || descLower.includes('vodafone') || descLower.includes('phone') || descLower.includes('mobile')) {
+      return {
+        name: 'Telecommunications',
+        confidence: 0.90,
+        reasoning: 'Telecommunications service detected',
+        alternatives: ['Utilities', 'Business Expenses'],
+        type: 'deductible',
+        description: 'Phone and internet services'
+      };
+    }
+    
+    // Office supplies
+    if (descLower.includes('office') || descLower.includes('stationery') || descLower.includes('supplies')) {
+      return {
+        name: 'Office Supplies',
+        confidence: 0.85,
+        reasoning: 'Office supplies detected',
+        alternatives: ['Business Expenses', 'Equipment'],
+        type: 'deductible',
+        description: 'Office equipment and supplies'
+      };
+    }
+    
+    // Default category
+    return {
+      name: 'General Business',
+      confidence: 0.60,
+      reasoning: 'Default business categorization',
+      alternatives: ['Personal', 'Other'],
+      type: 'expense',
+      description: 'General business expense'
     };
   }
 

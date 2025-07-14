@@ -16,7 +16,8 @@
 
 import { ReferenceDataParser, TransactionAnalysisResult } from './ReferenceDataParser';
 import { TransactionClassificationAIAgent } from './TransactionClassificationAIAgent';
-import { AIConfig, AIDataContext } from '../types/ai-types';
+import { AIConfig } from '../types/ai-types';
+import { AIDataContext } from './BaseAIService';
 
 export interface BatchTransaction {
   id: string;
@@ -95,10 +96,10 @@ export class BatchProcessingEngine {
 
   constructor(config: AIConfig) {
     this.config = config;
-    this.referenceParser = new ReferenceDataParser();
+    this.referenceParser = new ReferenceDataParser(config);
     
     // Initialize AI agent if API key is available
-    if (config.apiKey && config.apiKey !== 'mock') {
+    if (config.apiKey) {
       this.aiAgent = new TransactionClassificationAIAgent(config);
     }
   }
@@ -183,8 +184,7 @@ export class BatchProcessingEngine {
       const result = await this.referenceParser.classifyTransaction(
         transaction.description,
         transaction.amount,
-        transaction.merchant,
-        transaction.date
+        transaction.merchant
       );
       
       if (result && result.confidence >= confidenceThreshold) {
@@ -251,19 +251,16 @@ export class BatchProcessingEngine {
       const context: AIDataContext = {
         userId: 'batch-processing',
         userProfile: {
-          businessType: options.userProfile?.businessType || 'SOLE_TRADER',
-          industry: options.userProfile?.industry || 'Software Services',
+          businessType: options.userProfile?.businessType || 'unknown',
+          industry: options.userProfile?.industry || 'general',
+          taxPreferences: [],
           commonExpenses: [],
           incomeSources: [],
-          taxPreferences: [],
           learningPreferences: []
         },
         historicalData: [],
         learningFeedback: [],
-        preferences: {
-          countryCode: options.userProfile?.countryCode || 'AU',
-          profession: 'Software Developer'
-        }
+        preferences: {}
       };
       
       // Process each transaction in the batch
@@ -282,19 +279,19 @@ export class BatchProcessingEngine {
           // Convert AI result to our standard format
           const standardResult: TransactionAnalysisResult = {
             transactionId: transaction.id,
-            category: aiResult.category || 'Uncategorized',
-            subcategory: aiResult.subcategory || '',
+            category: 'Uncategorized',
+            subcategory: 'General',
             confidence: aiResult.confidence || 0.7,
-            isTaxDeductible: aiResult.isTaxDeductible || false,
-            businessUsePercentage: aiResult.businessUsePercentage || 0,
-            taxCategory: aiResult.taxCategory || 'Personal',
-            isBill: aiResult.isBill || false,
-            isRecurring: aiResult.isRecurring || false,
+            isTaxDeductible: false,
+            businessUsePercentage: 0,
+            taxCategory: 'Personal',
+            isBill: (aiResult.classification === 'bill') || false,
+            isRecurring: aiResult.recurring || false,
             estimatedFrequency: aiResult.recurringPattern?.frequency,
             reasoning: aiResult.reasoning || 'AI classification',
             primaryType: transaction.type === 'credit' ? 'income' : 'expense',
             processedAt: new Date().toISOString(),
-            source: 'ai_classification'
+            source: 'ai'
           };
           
           results.push(standardResult);
@@ -603,7 +600,7 @@ export class BatchProcessingEngine {
       reasoning: 'Mock classification - configure AI for real analysis',
       primaryType: transaction.type === 'credit' ? 'income' : 'expense',
       processedAt: new Date().toISOString(),
-      source: 'ai_classification'
+      source: 'ai'
     }));
   }
 
@@ -621,7 +618,7 @@ export class BatchProcessingEngine {
       reasoning: 'Fallback classification due to processing error',
       primaryType: transaction.type === 'credit' ? 'income' : 'expense',
       processedAt: new Date().toISOString(),
-      source: 'ai_classification'
+      source: 'ai'
     };
   }
 

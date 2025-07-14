@@ -29,6 +29,10 @@ app.use('/api/simple', aiSimpleRoutes);
 import aiOptimizedRoutes from './routes/ai-batch-optimized';
 app.use('/api/optimized', aiOptimizedRoutes);
 
+// 🔧 CRITICAL FIX: Add direct /api/classify route that core app expects
+// This fixes the 404 "Cannot POST /api/classify" errors
+app.use('/api', aiRoutes);  // This makes /api/classify available directly
+
 // Add direct classify endpoint for backward compatibility
 app.post('/api/classify', async (req, res) => {
   try {
