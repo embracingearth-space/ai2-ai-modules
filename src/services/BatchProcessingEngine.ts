@@ -239,6 +239,9 @@ export class BatchProcessingEngine {
 
   /**
    * 🎯 SINGLE AI BATCH PROCESSING
+   * 
+   * 🔧 ARCHITECTURAL OPTIMIZATION: Process transactions in true batches to reduce API calls
+   * Instead of 1 API call per transaction, we group multiple transactions into single prompts
    */
   private async processAIBatch(
     batch: BatchTransaction[],
@@ -263,58 +266,147 @@ export class BatchProcessingEngine {
         preferences: {}
       };
       
-      // Process each transaction in the batch
-      for (const transaction of batch) {
+      // 🚀 OPTIMIZATION: Process multiple transactions in a single AI call instead of individual calls
+      // This reduces API calls from N to 1 per batch (e.g., 50 calls -> 1 call per batch)
+      if (this.aiAgent && batch.length > 1) {
         try {
-          const aiResult = await this.aiAgent!.classifyTransaction(
-            {
-              description: transaction.description,
-              amount: transaction.amount,
-              merchant: transaction.merchant,
-              date: transaction.date
-            },
+          console.log(`🔄 Processing batch of ${batch.length} transactions with single AI call`);
+          
+          // Use bulk classification if available
+          const bulkResult = await this.aiAgent.bulkClassifyTransactions(
+            batch.map(t => ({
+              description: t.description,
+              amount: t.amount,
+              merchant: t.merchant,
+              date: t.date
+            })),
             context
           );
           
-          // Convert AI result to our standard format
-          const standardResult: TransactionAnalysisResult = {
-            transactionId: transaction.id,
-            category: 'Uncategorized',
-            subcategory: 'General',
-            confidence: aiResult.confidence || 0.7,
-            isTaxDeductible: false,
-            businessUsePercentage: 0,
-            taxCategory: 'Personal',
-            isBill: (aiResult.classification === 'bill') || false,
-            isRecurring: aiResult.recurring || false,
-            estimatedFrequency: aiResult.recurringPattern?.frequency,
-            reasoning: aiResult.reasoning || 'AI classification',
-            primaryType: transaction.type === 'credit' ? 'income' : 'expense',
-            processedAt: new Date().toISOString(),
-            source: 'ai'
-          };
+          // Convert bulk results to individual transaction results
+          batch.forEach((transaction, index) => {
+            const aiResult = bulkResult[index] || this.createFallbackAIResult(transaction);
+            
+            const standardResult: TransactionAnalysisResult = {
+              transactionId: transaction.id,
+              category: aiResult.category || 'Uncategorized',
+              subcategory: aiResult.subcategory || 'General',
+              confidence: aiResult.confidence || 0.7,
+              isTaxDeductible: aiResult.isTaxDeductible || false,
+              businessUsePercentage: aiResult.businessUsePercentage || 0,
+              taxCategory: aiResult.taxCategory || 'Personal',
+              isBill: (aiResult.classification === 'bill') || false,
+              isRecurring: aiResult.recurring || false,
+              estimatedFrequency: aiResult.recurringPattern?.frequency,
+              reasoning: aiResult.reasoning || 'AI batch classification',
+              primaryType: transaction.type === 'credit' ? 'income' : 'expense',
+              processedAt: new Date().toISOString(),
+            };
+            
+            results.push(standardResult);
+          });
           
-          results.push(standardResult);
+          // 📊 COST TRACKING: Only 1 API call for entire batch
+          this.processingStats.aiCallsMade += 1; // Single batch call
+          this.processingStats.totalCost += this.estimateBatchCost(1); // Cost for 1 call
           
-        } catch (error) {
-          console.error(`❌ AI processing failed for transaction ${transaction.id}:`, error);
+          console.log(`✅ Batch processed with 1 API call instead of ${batch.length} calls`);
           
-          // Fallback to basic classification
-          results.push(this.createFallbackResult(transaction));
+        } catch (bulkError) {
+          console.warn('⚠️ Bulk processing failed, falling back to individual processing:', bulkError);
+          // Fallback to individual processing if bulk fails
+          await this.processIndividualTransactions(batch, context, results, options);
         }
+      } else {
+        // Process individual transactions for small batches or when no AI agent
+        await this.processIndividualTransactions(batch, context, results, options);
       }
-      
-      this.processingStats.aiCallsMade += batch.length;
-      this.processingStats.totalCost += this.estimateBatchCost(batch.length);
       
     } catch (error) {
       console.error('❌ Batch AI processing failed:', error);
       
-      // Create fallback results for entire batch
-      results.push(...batch.map(t => this.createFallbackResult(t)));
+      // Create fallback results for all transactions in batch
+      batch.forEach(transaction => {
+        results.push(this.createFallbackResult(transaction));
+      });
     }
     
     return results;
+  }
+
+  /**
+   * 🔧 HELPER: Process transactions individually (fallback method)
+   * This is the old method - only used when bulk processing fails
+   */
+  private async processIndividualTransactions(
+    batch: BatchTransaction[],
+    context: AIDataContext,
+    results: TransactionAnalysisResult[],
+    options: BatchProcessingOptions
+  ): Promise<void> {
+    // 🚨 PERFORMANCE WARNING: This processes each transaction individually
+    // This should only be used as a fallback when bulk processing fails
+    console.log(`⚠️ Processing ${batch.length} transactions individually (not optimal)`);
+    
+    for (const transaction of batch) {
+      try {
+        const aiResult = await this.aiAgent!.classifyTransaction(
+          {
+            description: transaction.description,
+            amount: transaction.amount,
+            merchant: transaction.merchant,
+            date: transaction.date
+          },
+          context
+        );
+        
+        // Convert AI result to our standard format
+        const standardResult: TransactionAnalysisResult = {
+          transactionId: transaction.id,
+          category: aiResult.category || 'Uncategorized',
+          subcategory: aiResult.subcategory || 'General',
+          confidence: aiResult.confidence || 0.7,
+          isTaxDeductible: aiResult.isTaxDeductible || false,
+          businessUsePercentage: aiResult.businessUsePercentage || 0,
+          taxCategory: aiResult.taxCategory || 'Personal',
+          isBill: (aiResult.classification === 'bill') || false,
+          isRecurring: aiResult.recurring || false,
+          estimatedFrequency: aiResult.recurringPattern?.frequency,
+          reasoning: aiResult.reasoning || 'AI classification',
+          primaryType: transaction.type === 'credit' ? 'income' : 'expense',
+          processedAt: new Date().toISOString(),
+        };
+        
+        results.push(standardResult);
+        
+      } catch (error) {
+        console.error(`❌ AI processing failed for transaction ${transaction.id}:`, error);
+        
+        // Fallback to basic classification
+        results.push(this.createFallbackResult(transaction));
+      }
+    }
+    
+    // 📊 COST TRACKING: Individual calls (more expensive)
+    this.processingStats.aiCallsMade += batch.length;
+    this.processingStats.totalCost += this.estimateBatchCost(batch.length);
+  }
+
+  /**
+   * 🔧 HELPER: Create fallback AI result for failed processing
+   */
+  private createFallbackAIResult(transaction: BatchTransaction): any {
+    return {
+      category: 'Uncategorized',
+      subcategory: 'General',
+      confidence: 0.5,
+      isTaxDeductible: false,
+      businessUsePercentage: 0,
+      taxCategory: 'Personal',
+      classification: 'expense',
+      recurring: false,
+      reasoning: 'Fallback classification due to AI processing failure'
+    };
   }
 
   /**

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 export interface APILogEntry {
   timestamp: string;
@@ -31,6 +32,14 @@ export interface APILogEntry {
     userProfile?: any;
     transactionCount?: number;
     costEstimate?: number;
+    // 🆕 Enhanced metadata for comprehensive local logging
+    serverInfo?: {
+      hostname: string;
+      workerId: string;
+      memoryUsage: NodeJS.MemoryUsage;
+    };
+    apiCallSequence?: number;
+    batchId?: string;
   };
 }
 
@@ -38,20 +47,29 @@ export class APILogger {
   private logDir: string;
   private logFile: string;
   private errorLogFile: string;
+  private performanceLogFile: string;
   private sessionId: string;
+  private apiCallCounter: number = 0;
 
   constructor() {
+    // 🔥 CRITICAL: Use root-level logs directory for all AI API logging
     this.logDir = path.join(process.cwd(), 'logs');
     this.logFile = path.join(this.logDir, 'api-requests.log');
     this.errorLogFile = path.join(this.logDir, 'api-errors.log');
+    this.performanceLogFile = path.join(this.logDir, 'api-performance.log');
     this.sessionId = this.generateSessionId();
     
     // Create logs directory if it doesn't exist
     this.ensureLogDirectory();
+    
+    console.log(`📁 AI API Logging initialized: ${this.logDir}`);
+    console.log(`📝 API Requests: ${this.logFile}`);
+    console.log(`❌ API Errors: ${this.errorLogFile}`);
+    console.log(`📊 Performance: ${this.performanceLogFile}`);
   }
 
   /**
-   * 🔍 Log API Request Start
+   * 🔍 Log API Request Start - Enhanced Local Logging
    */
   logRequest(
     service: string,
@@ -63,7 +81,17 @@ export class APILogger {
     const requestId = this.generateRequestId();
     const timestamp = new Date().toISOString();
     
-    const logEntry: Partial<APILogEntry> = {
+    // 🆕 Increment API call counter for tracking
+    this.apiCallCounter++;
+    
+    // 🆕 Enhanced server information
+    const serverInfo = {
+      hostname: os.hostname(),
+      workerId: process.env.WORKER_ID || process.pid.toString(),
+      memoryUsage: process.memoryUsage()
+    };
+    
+    const logEntry: APILogEntry = {
       timestamp,
       sessionId: this.sessionId,
       requestId,
@@ -71,7 +99,7 @@ export class APILogger {
       method,
       request: {
         prompt: this.sanitizePrompt(prompt),
-        model: config.model || 'gpt-3.5-turbo',
+        model: config.model || 'gpt-4',
         maxTokens: config.maxTokens || 1000,
         temperature: config.temperature || 0.7,
         context: metadata.context
@@ -80,18 +108,23 @@ export class APILogger {
         userId: metadata.userId,
         userProfile: metadata.userProfile,
         transactionCount: metadata.transactionCount,
-        costEstimate: metadata.costEstimate
+        costEstimate: metadata.costEstimate,
+        // 🆕 Enhanced metadata
+        serverInfo,
+        apiCallSequence: this.apiCallCounter,
+        batchId: metadata.batchId
       }
     };
 
+    // 🔥 CRITICAL: Write to local logs directory
     this.writeToLog(logEntry);
     
-    console.log(`📝 API Request logged: ${service}.${method} [${requestId}]`);
+    console.log(`📝 [${this.apiCallCounter}] API Request logged: ${service}.${method} [${requestId}] | Model: ${config.model}`);
     return requestId;
   }
 
   /**
-   * ✅ Log API Response Success
+   * ✅ Log API Response Success - Enhanced Local Logging
    */
   logResponse(
     requestId: string,
@@ -114,13 +147,19 @@ export class APILogger {
       }
     };
 
+    // 🔥 CRITICAL: Write to local logs directory
     this.writeToLog(logEntry);
     
-    console.log(`✅ API Response logged: [${requestId}] ${processingTimeMs}ms`);
+    // 📊 Log performance metrics if slow
+    if (processingTimeMs > 5000) {
+      this.logPerformanceMetric('slow_response', requestId, processingTimeMs, tokensUsed);
+    }
+    
+    console.log(`✅ API Response logged: [${requestId}] ${processingTimeMs}ms | Tokens: ${tokensUsed || 'N/A'}`);
   }
 
   /**
-   * ❌ Log API Error
+   * ❌ Log API Error - Enhanced Local Logging
    */
   logError(
     requestId: string,
@@ -145,10 +184,11 @@ export class APILogger {
       }
     };
 
+    // 🔥 CRITICAL: Write to both main log and error log
     this.writeToLog(logEntry);
     this.writeToErrorLog(logEntry);
     
-    console.error(`❌ API Error logged: [${requestId}] ${error.message}`);
+    console.error(`❌ API Error logged: [${requestId}] ${error.message} | Time: ${processingTimeMs}ms`);
   }
 
   /**
@@ -270,6 +310,11 @@ export class APILogger {
     fs.appendFileSync(this.errorLogFile, logLine);
   }
 
+  private writeToPerformanceLog(logEntry: Partial<APILogEntry>): void {
+    const logLine = JSON.stringify(logEntry) + '\n';
+    fs.appendFileSync(this.performanceLogFile, logLine);
+  }
+
   private readLogs(timeRange: string): APILogEntry[] {
     const logs = this.readAllLogs();
     const now = new Date();
@@ -346,6 +391,119 @@ export class APILogger {
     });
     
     return breakdown;
+  }
+
+  /**
+   * 📊 Log Performance Metrics
+   */
+  private logPerformanceMetric(
+    metric: string,
+    requestId: string,
+    value: number,
+    additionalData?: any
+  ): void {
+    const performanceEntry = {
+      timestamp: new Date().toISOString(),
+      sessionId: this.sessionId,
+      requestId,
+      metric,
+      value,
+      additionalData,
+      serverInfo: {
+        hostname: os.hostname(),
+        workerId: process.env.WORKER_ID || process.pid.toString(),
+        memoryUsage: process.memoryUsage()
+      }
+    };
+    
+    this.writeToPerformanceLog(performanceEntry);
+  }
+
+  /**
+   * 📊 Get API call statistics for monitoring
+   */
+  public getAPICallStats(): {
+    totalCalls: number;
+    sessionId: string;
+    bufferSize: number;
+    externalLoggingEnabled: boolean;
+  } {
+    return {
+      totalCalls: this.apiCallCounter,
+      sessionId: this.sessionId,
+      bufferSize: 0, // No external buffer in this simplified version
+      externalLoggingEnabled: false // No external logging enabled
+    };
+  }
+
+  /**
+   * 📋 Get current log file paths for reference
+   */
+  public getLogFilePaths(): {
+    apiRequests: string;
+    apiErrors: string;
+    apiPerformance: string;
+  } {
+    return {
+      apiRequests: this.logFile,
+      apiErrors: this.errorLogFile,
+      apiPerformance: this.performanceLogFile
+    };
+  }
+
+  /**
+   * 📊 Generate comprehensive summary of API usage
+   */
+  public generateAPISummary(): {
+    totalCalls: number;
+    sessionId: string;
+    logFiles: ReturnType<typeof this.getLogFilePaths>;
+    recentActivity: string;
+  } {
+    const recentLogs = this.readRecentLogs(10);
+    const recentActivity = recentLogs.length > 0 ? 
+      `Last call: ${recentLogs[0].service}.${recentLogs[0].method} at ${recentLogs[0].timestamp}` :
+      'No recent activity';
+
+    return {
+      totalCalls: this.apiCallCounter,
+      sessionId: this.sessionId,
+      logFiles: this.getLogFilePaths(),
+      recentActivity
+    };
+  }
+
+  /**
+   * 📖 Read recent log entries for monitoring
+   */
+  private readRecentLogs(count: number = 10): APILogEntry[] {
+    try {
+      if (!fs.existsSync(this.logFile)) {
+        return [];
+      }
+
+      const content = fs.readFileSync(this.logFile, 'utf-8');
+      const lines = content.trim().split('\n').filter(line => line.length > 0);
+      const recentLines = lines.slice(-count);
+      
+      return recentLines.map(line => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      }).filter(entry => entry !== null) as APILogEntry[];
+    } catch (error) {
+      console.error('Error reading recent logs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🧹 No-op cleanup method (simplified version)
+   */
+  public cleanup(): void {
+    console.log(`📊 AI API Logger cleanup - Total calls logged: ${this.apiCallCounter}`);
   }
 }
 
