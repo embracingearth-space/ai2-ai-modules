@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { BaseAIService, AIConfig, TransactionAnalysis, CSVFormatAnalysis, AIQueryResult, UserProfile, AILearningFeedback, AIAgentTask, AIDataContext } from './BaseAIService';
 import { TaxLawFactory } from '../tax/TaxLawFactory';
+import { apiLogger } from './APILogger';
 
 export class OpenAIService extends BaseAIService {
   private openai: OpenAI;
@@ -14,15 +15,30 @@ export class OpenAIService extends BaseAIService {
   }
 
   /**
-   * Execute a single AI agent task
+   * Execute a single AI agent task with logging
    */
   async executeTask(task: AIAgentTask, context: AIDataContext): Promise<any> {
     const startTime = Date.now();
     let success = false;
     let cost = 0;
+    let requestId: string | null = null;
 
     try {
       let result: any;
+
+      // Log the task start
+      requestId = apiLogger.logRequest(
+        'OpenAIService',
+        `executeTask.${task.taskType}`,
+        JSON.stringify(task.data),
+        this.config,
+        {
+          userId: context.userId,
+          userProfile: context.userProfile,
+          transactionCount: task.data.transactions?.length || 1,
+          costEstimate: await this.estimateTaskCost(task.taskType, task.data)
+        }
+      );
 
       switch (task.taskType) {
         case 'analyze_transaction':
@@ -70,9 +86,20 @@ export class OpenAIService extends BaseAIService {
       success = true;
       cost = await this.estimateTaskCost(task.taskType, task.data);
       
+      // Log successful response
+      if (requestId) {
+        apiLogger.logResponse(requestId, result, Date.now() - startTime);
+      }
+      
       return result;
     } catch (error) {
       success = false;
+      
+      // Log error
+      if (requestId) {
+        apiLogger.logError(requestId, error as Error, Date.now() - startTime);
+      }
+      
       throw error;
     } finally {
       const executionTime = Date.now() - startTime;
@@ -163,6 +190,7 @@ export class OpenAIService extends BaseAIService {
     date: Date,
     context?: string
   ): Promise<TransactionAnalysis> {
+    const startTime = Date.now();
     const taxLaw = TaxLawFactory.getTaxLaw(this.config.countryCode);
     const businessTypes = taxLaw.getBusinessTypes();
     
@@ -209,27 +237,73 @@ Respond in JSON format:
       businessTypes: JSON.stringify(businessTypes, null, 2)
     });
 
-    const response = await this.retryWithBackoff(async () => {
-      const completion = await this.openai.chat.completions.create({
-        model: this.config.model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: this.config.maxTokens,
-        temperature: this.config.temperature,
+    // 📝 Log the OpenAI API request
+    const requestId = apiLogger.logRequest(
+      'OpenAIService',
+      'analyzeTransaction',
+      prompt,
+      this.config,
+      {
+        userId: 'transaction-analysis',
+        transactionCount: 1,
+        costEstimate: 0.025,
+        context: {
+          description,
+          amount,
+          date: this.dateToISOString(date),
+          countryCode: this.config.countryCode
+        }
+      }
+    );
+
+    try {
+      const response = await this.retryWithBackoff(async () => {
+        const completion = await this.openai.chat.completions.create({
+          model: this.config.model,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) {
+          throw new Error('No response from OpenAI');
+        }
+
+        try {
+          const parsed = JSON.parse(content);
+          
+          // 📝 Log successful response
+          const processingTime = Date.now() - startTime;
+          apiLogger.logResponse(
+            requestId,
+            parsed,
+            processingTime,
+            completion.usage?.total_tokens
+          );
+          
+          return parsed;
+        } catch (error) {
+          // 📝 Log parsing error
+          apiLogger.logError(
+            requestId,
+            new Error(`Failed to parse AI response: ${content}`),
+            Date.now() - startTime
+          );
+          throw new Error(`Failed to parse AI response: ${content}`);
+        }
       });
 
-      const content = completion.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from OpenAI');
-      }
-
-      try {
-        return JSON.parse(content);
-      } catch (error) {
-        throw new Error(`Failed to parse AI response: ${content}`);
-      }
-    });
-
-    return response as TransactionAnalysis;
+      return response as TransactionAnalysis;
+    } catch (error) {
+      // 📝 Log API error
+      apiLogger.logError(
+        requestId,
+        error as Error,
+        Date.now() - startTime
+      );
+      throw error;
+    }
   }
 
   async analyzeCSVFormat(
@@ -296,6 +370,7 @@ Respond in JSON format:
     transactions: any[],
     context?: string
   ): Promise<AIQueryResult> {
+    const startTime = Date.now();
     const prompt = this.formatPrompt(`
 You are a financial AI assistant. Answer the user's question about their transactions.
 
@@ -327,27 +402,72 @@ Respond in JSON format:
       transactions: JSON.stringify(transactions.slice(0, 50), null, 2) // Limit to first 50 for token efficiency
     });
 
-    const response = await this.retryWithBackoff(async () => {
-      const completion = await this.openai.chat.completions.create({
-        model: this.config.model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: this.config.maxTokens,
-        temperature: this.config.temperature,
+    // 📝 Log the OpenAI API request
+    const requestId = apiLogger.logRequest(
+      'OpenAIService',
+      'queryTransactions',
+      prompt,
+      this.config,
+      {
+        userId: 'query-analysis',
+        transactionCount: transactions.length,
+        costEstimate: 0.03,
+        context: {
+          query,
+          transactionCount: transactions.length,
+          contextProvided: !!context
+        }
+      }
+    );
+
+    try {
+      const response = await this.retryWithBackoff(async () => {
+        const completion = await this.openai.chat.completions.create({
+          model: this.config.model,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) {
+          throw new Error('No response from OpenAI');
+        }
+
+        try {
+          const parsed = JSON.parse(content);
+          
+          // 📝 Log successful response
+          const processingTime = Date.now() - startTime;
+          apiLogger.logResponse(
+            requestId,
+            parsed,
+            processingTime,
+            completion.usage?.total_tokens
+          );
+          
+          return parsed;
+        } catch (error) {
+          // 📝 Log parsing error
+          apiLogger.logError(
+            requestId,
+            new Error(`Failed to parse AI response: ${content}`),
+            Date.now() - startTime
+          );
+          throw new Error(`Failed to parse AI response: ${content}`);
+        }
       });
 
-      const content = completion.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from OpenAI');
-      }
-
-      try {
-        return JSON.parse(content);
-      } catch (error) {
-        throw new Error(`Failed to parse AI response: ${content}`);
-      }
-    });
-
-    return response as AIQueryResult;
+      return response as AIQueryResult;
+    } catch (error) {
+      // 📝 Log API error
+      apiLogger.logError(
+        requestId,
+        error as Error,
+        Date.now() - startTime
+      );
+      throw error;
+    }
   }
 
   async generateUserProfile(

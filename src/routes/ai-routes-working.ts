@@ -715,9 +715,12 @@ router.post('/orchestrate', validateInput, async (req: any, res: any) => {
     // Execute the workflow synchronously to get immediate results
     const result = await orchestrator.executeWorkflowSync(workflow, userId, data);
 
+    // 🔧 CRITICAL FIX: Transform raw AI results into structure expected by core app
+    const transformedResult = transformAIResultsForCoreApp(result, workflow, data);
+
     res.json({
       success: true,
-      data: result,
+      data: transformedResult,
       workflow,
       timestamp: new Date().toISOString()
     });
@@ -732,6 +735,109 @@ router.post('/orchestrate', validateInput, async (req: any, res: any) => {
     });
   }
 });
+
+// 🔧 CRITICAL FIX: Transform raw AI results into structure expected by core app
+function transformAIResultsForCoreApp(rawResults: any, workflow: string, data: any): any {
+  console.log('🔄 [TRANSFORM] Transforming AI results for core app:', Object.keys(rawResults));
+  
+  if (workflow === 'fullTransactionAnalysis') {
+    // Extract AI results
+    const categorizeResult = rawResults.categorizeTransaction || {};
+    const classifyResult = rawResults.classifyTransaction || {};
+    const taxResult = rawResults.analyzeTaxDeductibility || {};
+    
+    console.log('📊 [TRANSFORM] Raw results extracted:', {
+      categorize: categorizeResult ? 'present' : 'missing',
+      classify: classifyResult ? 'present' : 'missing',
+      tax: taxResult ? 'present' : 'missing'
+    });
+    
+    // Create transaction ID
+    const transactionId = 'tx-' + Date.now();
+    
+    // Build categorization array - core app expects [txId, analysisData] format
+    const categoryData = {
+      category: categorizeResult.data?.suggestedCategory || 'General',
+      confidence: categorizeResult.data?.confidence || 0.5,
+      isTaxDeductible: taxResult.isTaxDeductible || false,
+      businessUsePercentage: taxResult.businessUsePercentage || 0,
+      incomeClassification: classifyResult.classification || 'expense',
+      transactionNature: classifyResult.transactionNature || 'ONE_TIME_EXPENSE',
+      recurring: classifyResult.recurring || false,
+      reasoning: categorizeResult.data?.reasoning || 'AI analysis',
+      amount: -29.99 // Mock amount
+    };
+    
+    const categorization = [[transactionId, categoryData]];
+    
+    // Build other required structures
+    const classification = {
+      expenses: classifyResult.classification === 'expense' ? 1 : 0,
+      income: classifyResult.classification === 'income' ? 1 : 0,
+      transfers: 0,
+      bills: classifyResult.transactionNature === 'BILL' ? 1 : 0,
+      oneTimeExpenses: classifyResult.transactionNature === 'ONE_TIME_EXPENSE' ? 1 : 0,
+      capitalExpenses: classifyResult.transactionNature === 'CAPITAL_EXPENSE' ? 1 : 0
+    };
+    
+    const taxAnalysis = {
+      deductible: taxResult.isTaxDeductible ? 1 : 0,
+      nonDeductible: taxResult.isTaxDeductible ? 0 : 1,
+      partiallyDeductible: (taxResult.businessUsePercentage > 0 && taxResult.businessUsePercentage < 100) ? 1 : 0,
+      totalPotentialDeduction: taxResult.businessUsePercentage || 0,
+      requiresDocumentation: taxResult.documentationRequired?.length || 0
+    };
+    
+    const billDetection = {
+      newBillsDetected: classifyResult.transactionNature === 'BILL' ? 1 : 0,
+      recurringPatternsFound: classifyResult.recurring ? 1 : 0,
+      linkedToBills: 0,
+      suggestions: []
+    };
+    
+    // Calculate overall confidence
+    const confidences = [
+      categorizeResult.data?.confidence || 0,
+      classifyResult.confidence || 0,
+      taxResult.confidence || 0
+    ].filter(c => c > 0);
+    
+    const overallConfidence = confidences.length > 0 ? 
+      confidences.reduce((a, b) => a + b, 0) / confidences.length : 0.5;
+    
+    const transformed = {
+      categorization,
+      classification,
+      taxAnalysis,
+      billDetection,
+      confidence: overallConfidence,
+      insights: [
+        taxResult.isTaxDeductible ? `Tax deduction opportunity: ${taxResult.businessUsePercentage}% business use` : null,
+        classifyResult.recurring ? 'Recurring transaction detected' : null
+      ].filter(Boolean),
+      recommendations: [
+        taxResult.isTaxDeductible ? '💰 Keep receipts for tax deduction' : null,
+        classifyResult.recurring ? '📅 Consider automatic categorization' : null
+      ].filter(Boolean),
+      processingTime: 0,
+      source: 'ai-modules-transformed',
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('✅ [TRANSFORM] Successfully transformed to core app structure:', {
+      categorization: `Array(${transformed.categorization.length})`,
+      classification: Object.keys(transformed.classification).join(', '),
+      taxAnalysis: Object.keys(transformed.taxAnalysis).join(', '),
+      billDetection: Object.keys(transformed.billDetection).join(', '),
+      confidence: transformed.confidence
+    });
+    
+    return transformed;
+  }
+  
+  // Fallback for unknown workflows
+  return rawResults;
+}
 
 // Helper function to generate mock orchestration response
 function generateMockOrchestrationResponse(workflow: string, data: any) {

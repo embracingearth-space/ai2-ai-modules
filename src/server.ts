@@ -4,11 +4,19 @@ import path from 'path';
 // Load environment variables from the correct path
 dotenv.config({ path: path.join(process.cwd(), '.env') });
 
+// 🔧 VERIFY OPENAI API KEY IS LOADED
+console.log('🔑 OpenAI API Key Status:', process.env.OPENAI_API_KEY ? 'CONFIGURED' : 'NOT CONFIGURED');
+if (!process.env.OPENAI_API_KEY) {
+  console.error('❌ CRITICAL: OpenAI API key is not configured!');
+  console.error('📝 Please check your .env file and ensure OPENAI_API_KEY is set');
+}
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { featureFlags } from './shared-mock';
 import aiRoutes from './routes/ai-routes-working';
+import logRoutes from './routes/log-routes';
 
 const app = express();
 const PORT = process.env.AI_PORT || 3002;
@@ -56,6 +64,9 @@ const corsOptions = {
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// 📝 API Logging Routes
+app.use('/api/logs', logRoutes);
 
 // 🔥 USER-SPECIFIC ANALYZE ENDPOINT - MUST BE BEFORE OTHER ROUTES
 // This handles requests like /cmd30zpi3000kp9iwwcj0w66b/analyze

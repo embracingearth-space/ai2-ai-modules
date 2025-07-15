@@ -1,6 +1,7 @@
 import { BaseAIService, AIConfig } from './BaseAIService';
 import { TaxLawFactory } from '../tax/TaxLawFactory';
 import OpenAI from 'openai';
+import { apiLogger } from './APILogger';
 
 export interface TaxDeductionAnalysis {
   isTaxDeductible: boolean;
@@ -104,6 +105,7 @@ export class TaxDeductionAIService extends BaseAIService {
     userProfile: UserTaxProfile,
     expenseType: 'expense' | 'bill' = 'expense'
   ): Promise<TaxDeductionAnalysis> {
+    const startTime = Date.now();
     const taxLaw = TaxLawFactory.getTaxLaw(userProfile.countryCode);
     const deductionRules = taxLaw.getDeductionRules();
     const occupationRules = taxLaw.getOccupationSpecificRules(userProfile.occupation);
@@ -190,33 +192,84 @@ Respond in JSON format:
       occupationRules: JSON.stringify(occupationRules, null, 2)
     });
 
-    const response = await this.retryWithBackoff(async () => {
-      const completion = await this.openai.chat.completions.create({
-        model: this.config.model,
-        messages: [
-          {
-            role: 'system',
-            content: `You are a professional tax advisor with expertise in ${userProfile.countryCode} tax law. Always provide accurate, conservative advice that errs on the side of compliance.`
-          },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: this.config.maxTokens,
-        temperature: 0.1, // Low temperature for consistent tax advice
+    // 📝 Log the OpenAI API request
+    const requestId = apiLogger.logRequest(
+      'TaxDeductionAIService',
+      'analyzeTaxDeductibility',
+      prompt,
+      this.config,
+      {
+        userId: 'tax-analysis',
+        transactionCount: 1,
+        costEstimate: 0.04,
+        context: {
+          description,
+          amount,
+          category,
+          expenseType,
+          countryCode: userProfile.countryCode,
+          businessType: userProfile.businessType
+        }
+      }
+    );
+
+    try {
+      const response = await this.retryWithBackoff(async () => {
+        const completion = await this.openai.chat.completions.create({
+          model: this.config.model,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a professional tax advisor with expertise in ${userProfile.countryCode} tax law. Always provide accurate, conservative advice that errs on the side of compliance.`
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) {
+          throw new Error('No response from OpenAI');
+        }
+
+        try {
+          const parsed = JSON.parse(content);
+          
+          // 📝 Log successful response
+          const processingTime = Date.now() - startTime;
+          apiLogger.logResponse(
+            requestId,
+            parsed,
+            processingTime,
+            completion.usage?.total_tokens
+          );
+          
+          return parsed;
+        } catch (parseError) {
+          // 📝 Log parsing error
+          apiLogger.logError(
+            requestId,
+            new Error(`Failed to parse AI response: ${content}`),
+            Date.now() - startTime
+          );
+          throw new Error(`Failed to parse AI response: ${content}`);
+        }
       });
 
-      const content = completion.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from OpenAI');
-      }
-
-      try {
-        return JSON.parse(content);
-      } catch (error) {
-        throw new Error(`Failed to parse AI response: ${content}`);
-      }
-    });
-
-    return response as TaxDeductionAnalysis;
+      return response as TaxDeductionAnalysis;
+    } catch (error) {
+      // 📝 Log API error
+      apiLogger.logError(
+        requestId,
+        error as Error,
+        Date.now() - startTime
+      );
+      throw error;
+    }
   }
 
   /**
