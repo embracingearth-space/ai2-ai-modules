@@ -265,21 +265,7 @@ export class APILogger {
     console.log(`🧹 Cleaned logs older than ${daysToKeep} days. Kept ${filteredLogs.length} entries.`);
   }
 
-  // Private helper methods
-  private ensureLogDirectory(): void {
-    if (!fs.existsSync(this.logDir)) {
-      fs.mkdirSync(this.logDir, { recursive: true });
-    }
-  }
-
-  private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
+  // Private helper methods for sanitization
   private sanitizePrompt(prompt: string): string {
     // Truncate very long prompts for logging
     if (prompt.length > 2000) {
@@ -300,58 +286,6 @@ export class APILogger {
     }
   }
 
-  private writeToLog(logEntry: Partial<APILogEntry>): void {
-    const logLine = JSON.stringify(logEntry) + '\n';
-    fs.appendFileSync(this.logFile, logLine);
-  }
-
-  private writeToErrorLog(logEntry: Partial<APILogEntry>): void {
-    const logLine = JSON.stringify(logEntry) + '\n';
-    fs.appendFileSync(this.errorLogFile, logLine);
-  }
-
-  private writeToPerformanceLog(logEntry: Partial<APILogEntry>): void {
-    const logLine = JSON.stringify(logEntry) + '\n';
-    fs.appendFileSync(this.performanceLogFile, logLine);
-  }
-
-  private readLogs(timeRange: string): APILogEntry[] {
-    const logs = this.readAllLogs();
-    const now = new Date();
-    const cutoffTime = new Date();
-    
-    switch (timeRange) {
-      case 'hour':
-        cutoffTime.setHours(now.getHours() - 1);
-        break;
-      case 'day':
-        cutoffTime.setDate(now.getDate() - 1);
-        break;
-      case 'week':
-        cutoffTime.setDate(now.getDate() - 7);
-        break;
-    }
-    
-    return logs.filter(log => new Date(log.timestamp) > cutoffTime);
-  }
-
-  private readAllLogs(): APILogEntry[] {
-    if (!fs.existsSync(this.logFile)) {
-      return [];
-    }
-    
-    const logData = fs.readFileSync(this.logFile, 'utf8');
-    const lines = logData.split('\n').filter(line => line.trim());
-    
-    return lines.map(line => {
-      try {
-        return JSON.parse(line);
-      } catch (error) {
-        console.warn('Failed to parse log line:', line);
-        return null;
-      }
-    }).filter(log => log !== null);
-  }
 
   private calculateAverageProcessingTime(logs: APILogEntry[]): number {
     const successfulLogs = logs.filter(l => l.response?.success && l.response.processingTimeMs);
@@ -457,7 +391,11 @@ export class APILogger {
   public generateAPISummary(): {
     totalCalls: number;
     sessionId: string;
-    logFiles: ReturnType<typeof this.getLogFilePaths>;
+    logFiles: {
+      apiRequests: string;
+      apiErrors: string;
+      apiPerformance: string;
+    };
     recentActivity: string;
   } {
     const recentLogs = this.readRecentLogs(10);
@@ -504,6 +442,133 @@ export class APILogger {
    */
   public cleanup(): void {
     console.log(`📊 AI API Logger cleanup - Total calls logged: ${this.apiCallCounter}`);
+  }
+
+  // ========================================
+  // 🔥 MISSING CRITICAL FILE WRITING METHODS
+  // ========================================
+
+  /**
+   * 📁 Ensure logs directory exists
+   */
+  private ensureLogDirectory(): void {
+    try {
+      if (!fs.existsSync(this.logDir)) {
+        fs.mkdirSync(this.logDir, { recursive: true });
+        console.log(`📁 Created logs directory: ${this.logDir}`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to create logs directory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 📝 Write log entry to main API requests log file
+   */
+  private writeToLog(logEntry: Partial<APILogEntry>): void {
+    try {
+      const logLine = JSON.stringify(logEntry) + '\n';
+      fs.appendFileSync(this.logFile, logLine, 'utf-8');
+    } catch (error) {
+      console.error('❌ Failed to write to API log file:', error);
+      // Don't throw - logging should not break the application
+    }
+  }
+
+  /**
+   * ❌ Write error log entry to dedicated error log file
+   */
+  private writeToErrorLog(logEntry: Partial<APILogEntry>): void {
+    try {
+      const logLine = JSON.stringify(logEntry) + '\n';
+      fs.appendFileSync(this.errorLogFile, logLine, 'utf-8');
+    } catch (error) {
+      console.error('❌ Failed to write to error log file:', error);
+      // Don't throw - logging should not break the application
+    }
+  }
+
+  /**
+   * 📊 Write performance log entry to dedicated performance log file
+   */
+  private writeToPerformanceLog(performanceEntry: any): void {
+    try {
+      const logLine = JSON.stringify(performanceEntry) + '\n';
+      fs.appendFileSync(this.performanceLogFile, logLine, 'utf-8');
+    } catch (error) {
+      console.error('❌ Failed to write to performance log file:', error);
+      // Don't throw - logging should not break the application
+    }
+  }
+
+  /**
+   * 📖 Read all logs from file
+   */
+  private readAllLogs(): APILogEntry[] {
+    try {
+      if (!fs.existsSync(this.logFile)) {
+        return [];
+      }
+
+      const content = fs.readFileSync(this.logFile, 'utf-8');
+      const lines = content.trim().split('\n').filter(line => line.length > 0);
+      
+      return lines.map(line => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          console.warn('Failed to parse log line:', line);
+          return null;
+        }
+      }).filter(log => log !== null) as APILogEntry[];
+    } catch (error) {
+      console.error('❌ Failed to read logs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 📅 Read logs within a specific time range
+   */
+  private readLogs(timeRange: 'hour' | 'day' | 'week'): APILogEntry[] {
+    const allLogs = this.readAllLogs();
+    const now = new Date();
+    let cutoffTime: Date;
+
+    switch (timeRange) {
+      case 'hour':
+        cutoffTime = new Date(now.getTime() - 60 * 60 * 1000);
+        break;
+      case 'day':
+        cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        break;
+      case 'week':
+        cutoffTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    }
+
+    return allLogs.filter(log => new Date(log.timestamp) >= cutoffTime);
+  }
+
+  /**
+   * 🆔 Generate unique request ID
+   */
+  private generateRequestId(): string {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `req_${timestamp}_${random}`;
+  }
+
+  /**
+   * 🆔 Generate unique session ID
+   */
+  private generateSessionId(): string {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 10);
+    return `session_${timestamp}_${random}`;
   }
 }
 

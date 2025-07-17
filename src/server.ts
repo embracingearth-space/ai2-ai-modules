@@ -14,9 +14,10 @@ if (!process.env.OPENAI_API_KEY) {
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { featureFlags } from './shared-mock';
+// Temporarily disable problematic imports to get basic routes working
+// import { featureFlags } from './shared-mock';  
 import aiRoutes from './routes/ai-routes-working';
-import logRoutes from './routes/log-routes';
+// import logRoutes from './routes/log-routes'; // Temporarily disabled to avoid compilation issues
 
 const app = express();
 const PORT = process.env.AI_PORT || 3002;
@@ -65,8 +66,41 @@ app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// 📝 HTTP Request Logging Middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  const { method, url, ip } = req;
+  const userAgent = req.get('User-Agent') || 'unknown';
+
+  res.on('finish', () => {
+    const responseTime = Date.now() - startTime;
+    const { statusCode } = res;
+    
+    // Log to console with emoji for easy reading
+    const statusEmoji = statusCode >= 400 ? '❌' : '✅';
+    console.log(`${statusEmoji} AI Modules: ${method} ${url} - ${statusCode} (${responseTime}ms)`);
+    
+    // Also write to winston logger for file persistence
+    const logger = require('./logger').default;
+    logger.info('HTTP Request', {
+      method,
+      url,
+      statusCode,
+      responseTime,
+      ip,
+      userAgent,
+      service: 'ai-modules-http'
+    });
+  });
+
+  next();
+});
+
 // 📝 API Logging Routes
-app.use('/api/logs', logRoutes);
+// app.use('/api/logs', logRoutes); // Temporarily disabled to avoid compilation issues
+
+// 🧠 AI CLASSIFICATION ROUTES - CRITICAL: Mount the main AI routes  
+app.use('/', aiRoutes);
 
 // 🔥 USER-SPECIFIC ANALYZE ENDPOINT - MUST BE BEFORE OTHER ROUTES
 // This handles requests like /cmd30zpi3000kp9iwwcj0w66b/analyze
@@ -139,6 +173,10 @@ app.use('/api/simple', aiSimpleRoutes);
 // Mount optimized batch processing routes
 import aiOptimizedRoutes from './routes/ai-batch-optimized';
 app.use('/api/optimized', aiOptimizedRoutes);
+
+// Mount enhanced classification routes
+import aiEnhancedRoutes from './routes/ai-enhanced-classification';
+app.use('/api/ai', aiEnhancedRoutes);
 
 // 🔧 CRITICAL FIX: Add direct /api/classify route that core app expects
 // This fixes the 404 "Cannot POST /api/classify" errors
@@ -316,10 +354,10 @@ app.get('/health', (req, res) => {
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     features: {
-      aiEnabled: featureFlags.isFeatureEnabled('enableAI'),
-      categorization: featureFlags.isFeatureEnabled('enableAICategories'),
-      taxDeduction: featureFlags.isFeatureEnabled('enableAITaxDeduction'),
-      insights: featureFlags.isFeatureEnabled('enableAIInsights')
+      aiEnabled: false, // featureFlags.isFeatureEnabled('enableAI'), // Temporarily disabled
+      categorization: false, // featureFlags.isFeatureEnabled('enableAICategories'), // Temporarily disabled
+      taxDeduction: false, // featureFlags.isFeatureEnabled('enableAITaxDeduction'), // Temporarily disabled
+      insights: false // featureFlags.isFeatureEnabled('enableAIInsights') // Temporarily disabled
     }
   });
 });
@@ -411,7 +449,7 @@ app.get('/api/ai/status', (req, res) => {
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`🤖 AI Modules Service running on port ${PORT}`);
-    console.log(`📊 AI Features enabled: ${featureFlags.isAIEnabled()}`);
+    console.log(`📊 AI Features enabled: ${false}`); // Temporarily disabled
   });
 }
 

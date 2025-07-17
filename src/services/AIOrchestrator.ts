@@ -3,6 +3,10 @@ import { CategoriesAIAgent } from './CategoriesAIAgent';
 import { TransactionClassificationAIAgent } from './TransactionClassificationAIAgent';
 import { TaxDeductionAIService } from './TaxDeductionAIService';
 import winston from 'winston';
+import path from 'path';
+
+// Create logs directory path  
+const logsDir = path.join(process.cwd(), 'logs');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -15,6 +19,14 @@ const logger = winston.createLogger({
   transports: [
     new winston.transports.Console({
       format: winston.format.simple()
+    }),
+    // Add file transport for ai-orchestrator logs
+    new winston.transports.File({
+      filename: path.join(logsDir, 'ai-orchestrator.log'),
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      )
     })
   ],
 });

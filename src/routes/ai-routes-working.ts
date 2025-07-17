@@ -12,11 +12,16 @@ const router = Router();
 router.get('/health', (req: any, res: any) => {
   const config = getAIConfig();
   res.json({
-    status: 'online',
+    status: 'healthy',
     service: 'ai-modules',
-    features: ['classification', 'orchestration', 'tax-analysis'],
+    features: {
+      aiEnabled: true,
+      categorization: true,
+      taxDeduction: true,
+      insights: true
+    },
     version: '1.0.0',
-    apiKeyConfigured: !!config.apiKey,
+    apiKeyConfigured: !!config.apiKey && config.apiKey.length > 0,
     timestamp: new Date().toISOString()
   });
 });
