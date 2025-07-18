@@ -395,16 +395,33 @@ export class BatchProcessingEngine {
       amount: t.amount
     }));
 
-    // Create categorization prompt
-    const prompt = `Helpcategorize financial transactions.
+    // Build user context information
+    const userProfile = context.userProfile;
+    const businessContext = userProfile?.businessType ? `Business Type: ${userProfile.businessType}` : '';
+    const industryContext = userProfile?.industry ? `Industry: ${userProfile.industry}` : '';
+    
+    // Get AI context from preferences if available
+    const preferences = context.preferences;
+    const psychologyContext = preferences?.aiContextInput ? `User Context: ${preferences.aiContextInput}` : '';
+    
+    const contextInfo = [businessContext, industryContext, psychologyContext]
+      .filter(Boolean)
+      .join('\n');
 
-User's categories: ${selectedCategories.join(', ')}
+    // Create categorization prompt with enhanced user context
+    const prompt = `Help categorize financial transactions based on user's business profile and preferences.
+
+${contextInfo ? `User Profile:
+${contextInfo}
+
+` : ''}User's categories: ${selectedCategories.join(', ')}
 
 Transactions to categorize:
 ${JSON.stringify(optimizedTransactions, null, 2)}
 
-For each , assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma,
-If a transaction could fit multiple categories, choose the BEST match.
+Consider the user's business type, industry, and personal context when categorizing transactions.
+For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma.
+If a transaction could fit multiple categories, choose the BEST match based on the user's context.
 If none of the categories fit well, you may suggest a new category.
 
 Respond with a JSON array where each element corresponds to a transaction in order:
