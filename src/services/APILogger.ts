@@ -119,7 +119,18 @@ export class APILogger {
     // 🔥 CRITICAL: Write to local logs directory
     this.writeToLog(logEntry);
     
-    console.log(`📝 [${this.apiCallCounter}] API Request logged: ${service}.${method} [${requestId}] | Model: ${config.model}`);
+    // 🚀 Enhanced console output for debugging
+    console.log(`\n🔵 [${this.apiCallCounter}] API REQUEST STARTED:`);
+    console.log(`   📋 Service: ${service}.${method}`);
+    console.log(`   🆔 Request ID: ${requestId}`);
+    console.log(`   🤖 Model: ${config.model || 'gpt-4'}`);
+    console.log(`   🎛️  Max Tokens: ${config.maxTokens || 1000}`);
+    console.log(`   🌡️  Temperature: ${config.temperature || 0.7}`);
+    console.log(`   💰 Cost Estimate: $${(metadata.costEstimate || 0).toFixed(4)}`);
+    console.log(`   📊 Transactions: ${metadata.transactionCount || 1}`);
+    console.log(`   📝 Prompt Length: ${prompt.length} chars`);
+    console.log(`   🔑 API Key: ${config.apiKey ? config.apiKey.substring(0, 7) + '...' : 'NOT SET'}\n`);
+    
     return requestId;
   }
 
@@ -155,7 +166,13 @@ export class APILogger {
       this.logPerformanceMetric('slow_response', requestId, processingTimeMs, tokensUsed);
     }
     
-    console.log(`✅ API Response logged: [${requestId}] ${processingTimeMs}ms | Tokens: ${tokensUsed || 'N/A'}`);
+    // 🚀 Enhanced console output for debugging
+    console.log(`🟢 API RESPONSE SUCCESS:`);
+    console.log(`   🆔 Request ID: ${requestId}`);
+    console.log(`   ⏱️  Processing Time: ${processingTimeMs}ms`);
+    console.log(`   🪙 Tokens Used: ${tokensUsed || 'N/A'}`);
+    console.log(`   📊 Response Length: ${JSON.stringify(response).length} chars`);
+    console.log(`   ✅ Status: SUCCESS\n`);
   }
 
   /**
@@ -188,7 +205,21 @@ export class APILogger {
     this.writeToLog(logEntry);
     this.writeToErrorLog(logEntry);
     
-    console.error(`❌ API Error logged: [${requestId}] ${error.message} | Time: ${processingTimeMs}ms`);
+    // 🚀 Enhanced console output for debugging
+    console.log(`🔴 API ERROR:`);
+    console.log(`   🆔 Request ID: ${requestId}`);
+    console.log(`   ⏱️  Processing Time: ${processingTimeMs}ms`);
+    console.log(`   ❌ Error Code: ${(error as any).code || 'unknown'}`);
+    console.log(`   💬 Error Message: ${error.message}`);
+    console.log(`   📁 Saved to: ${this.errorLogFile}`);
+    
+    // Special handling for rate limit errors (429)
+    if ((error as any).status === 429 || error.message.includes('rate limit')) {
+      console.log(`   🚫 RATE LIMIT HIT - Request saved to error log for analysis`);
+      console.log(`   ⏳ Retry suggested after rate limit reset`);
+    }
+    
+    console.log(``);
   }
 
   /**

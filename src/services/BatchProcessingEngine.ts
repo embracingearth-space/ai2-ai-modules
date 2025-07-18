@@ -36,10 +36,12 @@ export interface BatchProcessingOptions {
   confidenceThreshold: number; // Minimum confidence for reference data classification
   enableBillDetection: boolean; // Whether to detect recurring bills
   enableCostOptimization: boolean; // Whether to optimize for cost vs speed
+  enableCategorization?: boolean;  // 🎯 NEW: Enable categorization mode
+  selectedCategories?: string[];   // 🎯 NEW: User-selected categories
   userProfile?: {
     businessType: string;
     industry: string;
-    countryCode: string;
+    countryCode?: string;
   };
 }
 
@@ -158,7 +160,14 @@ export class BatchProcessingEngine {
       cachedResults: this.referenceParser.getCacheStats().size,
       totalCost: costBreakdown.costPerTransaction * transactions.length,
       processingTimeMs,
-      results: allResults,
+      results: allResults.map(result => {
+        // Find the original transaction to include its description
+        const originalTransaction = transactions.find(t => t.id === result.transactionId);
+        return {
+          ...result,
+          description: originalTransaction?.description || 'Unknown'
+        };
+      }),
       insights,
       costBreakdown,
       recurringBills
@@ -266,52 +275,88 @@ export class BatchProcessingEngine {
         preferences: {}
       };
       
-      // 🚀 OPTIMIZATION: Process multiple transactions in a single AI call instead of individual calls
-      // This reduces API calls from N to 1 per batch (e.g., 50 calls -> 1 call per batch)
-      if (this.aiAgent && batch.length > 1) {
+      // 🚀 NEW OPTIMIZATION: Process entire batch in single API call
+      if (this.aiAgent && batch.length > 0) {
         try {
-          console.log(`🔄 Processing batch of ${batch.length} transactions with single AI call`);
-          
-          // Use bulk classification if available
-          const bulkResult = await this.aiAgent.bulkClassifyTransactions(
-            batch.map(t => ({
-              description: t.description,
-              amount: t.amount,
-              merchant: t.merchant,
-              date: t.date
-            })),
-            context
-          );
-          
-          // Convert bulk results to individual transaction results
-          batch.forEach((transaction, index) => {
-            const aiResult = bulkResult[index] || this.createFallbackAIResult(transaction);
+          // 🎯 Check if we should use categorization mode
+          if (options.enableCategorization && options.selectedCategories && options.selectedCategories.length > 0) {
+            console.log(`🎯 Using CATEGORIZATION mode with categories: ${options.selectedCategories.join(', ')}`);
             
-            const standardResult: TransactionAnalysisResult = {
-              transactionId: transaction.id,
-                        category: aiResult.transactionNature || 'Uncategorized',
-          subcategory: aiResult.characteristics?.categoryPattern || 'General',
-          confidence: aiResult.confidence || 0.7,
-          isTaxDeductible: false,
-          source: 'ai',
-          businessUsePercentage: 0,
-          taxCategory: 'Personal',
-              isBill: (aiResult.classification === 'bill') || false,
-              isRecurring: aiResult.recurring || false,
-              estimatedFrequency: aiResult.recurringPattern?.frequency,
-              reasoning: aiResult.reasoning || 'AI batch classification',
-              primaryType: transaction.type === 'credit' ? 'income' : 'expense',
-              processedAt: new Date().toISOString(),
-            };
+            // Call the categorization method instead of classification
+            const categorizations = await this.categorizeBatchTransactions(
+              batch,
+              options.selectedCategories,
+              context
+            );
             
-            results.push(standardResult);
-          });
+            // Convert categorization results to standard format
+            categorizations.forEach((catResult, index) => {
+              const transaction = batch[index];
+              const standardResult: TransactionAnalysisResult = {
+                transactionId: transaction.id,
+                category: catResult.category || 'Uncategorized',
+                subcategory: catResult.subcategory || 'General',
+                confidence: catResult.confidence || 0.7,
+                isTaxDeductible: catResult.isTaxDeductible || false,
+                source: 'ai-categorization' as TransactionAnalysisResult['source'],
+                businessUsePercentage: catResult.businessUsePercentage || 0,
+                taxCategory: catResult.taxCategory || 'Personal',
+                isBill: false, // Not relevant for categorization
+                isRecurring: false, // Not relevant for categorization
+                reasoning: catResult.reasoning || 'AI categorization',
+                primaryType: transaction.type === 'credit' ? 'income' : 'expense',
+                processedAt: new Date().toISOString(),
+              };
+              
+              results.push(standardResult);
+            });
+            
+            console.log(`✅ Categorized ${batch.length} transactions with 1 API call`);
+            
+          } else {
+            // Original classification logic (bill vs expense)
+            console.log(`🔄 Processing batch of ${batch.length} transactions with single AI call`);
+            
+            const bulkResult = await this.aiAgent.bulkClassifyTransactions(
+              batch.map(t => ({
+                id: t.id,
+                description: t.description,
+                amount: t.amount,
+                merchant: t.merchant,
+                date: t.date
+              })),
+              context
+            );
+            
+            // Map bulk results to our standard format
+            bulkResult.classified.forEach((aiResult: any) => {
+              const transaction = batch.find(t => t.id === aiResult.transactionId);
+              if (!transaction) return;
+              
+              const standardResult: TransactionAnalysisResult = {
+                transactionId: transaction.id,
+                category: aiResult.transactionNature || 'Uncategorized',
+                subcategory: aiResult.subcategory || 'General',
+                confidence: aiResult.confidence || 0.7,
+                isTaxDeductible: false,
+                source: 'ai',
+                businessUsePercentage: 0,
+                taxCategory: 'Personal',
+                isBill: (aiResult.classification === 'bill') || false,
+                isRecurring: aiResult.recurring || false,
+                estimatedFrequency: aiResult.recurringPattern?.frequency,
+                reasoning: aiResult.reasoning || 'AI batch classification',
+                primaryType: transaction.type === 'credit' ? 'income' : 'expense',
+                processedAt: new Date().toISOString(),
+              };
+              
+              results.push(standardResult);
+            });
+          }
           
           // 📊 COST TRACKING: Only 1 API call for entire batch
           this.processingStats.aiCallsMade += 1; // Single batch call
           this.processingStats.totalCost += this.estimateBatchCost(1); // Cost for 1 call
-          
-          console.log(`✅ Batch processed with 1 API call instead of ${batch.length} calls`);
           
         } catch (bulkError) {
           console.warn('⚠️ Bulk processing failed, falling back to individual processing:', bulkError);
@@ -333,6 +378,113 @@ export class BatchProcessingEngine {
     }
     
     return results;
+  }
+
+  /**
+   * 🎯 CATEGORIZE BATCH TRANSACTIONS
+   * Categorize transactions into user-selected categories using AI
+   */
+  private async categorizeBatchTransactions(
+    transactions: BatchTransaction[],
+    selectedCategories: string[],
+    context: AIDataContext
+  ): Promise<any[]> {
+    // Prepare optimized transaction data (remove unnecessary fields)
+    const optimizedTransactions = transactions.map(t => ({
+      description: t.description,
+      amount: t.amount
+    }));
+
+    // Create categorization prompt
+    const prompt = `You are an AI assistant helping to categorize financial transactions.
+
+User's categories: ${selectedCategories.join(', ')}
+
+Transactions to categorize:
+${JSON.stringify(optimizedTransactions, null, 2)}
+
+For each , assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma,
+If a transaction could fit multiple categories, choose the BEST match.
+If none of the categories fit well, you may suggest a new category.
+
+Respond with a JSON array where each element corresponds to a transaction in order:
+[
+  {
+    "description": "transaction description",
+    "category": "assigned category from user's list",
+    "confidence": 0.0-1.0,
+    "isNewCategory": false,
+    "newCategoryName": null,
+    "reasoning": "1-2 word explanation"
+  }
+]`;
+
+    try {
+      console.log(`🤖 Sending categorization request for ${transactions.length} transactions`);
+      
+      // Use the AI agent's OpenAI instance directly
+      const openai = (this.aiAgent as any).openai;
+      if (!openai) {
+        throw new Error('OpenAI client not available');
+      }
+
+      const response = await openai.chat.completions.create({
+        model: process.env.AI_MODEL || 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful AI assistant that categorizes financial transactions accurately and concisely.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 2000
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error('No response from AI');
+      }
+
+      // Parse AI response
+      const categorizations = JSON.parse(content);
+      
+      // Validate and enhance results
+      return transactions.map((transaction, index) => {
+        const aiResult = categorizations[index] || {};
+        return {
+          description: transaction.description,
+          category: aiResult.category || selectedCategories[0] || 'Other',
+          subcategory: 'General',
+          confidence: aiResult.confidence || 0.7,
+          isNewCategory: aiResult.isNewCategory || false,
+          newCategoryName: aiResult.newCategoryName,
+          reasoning: aiResult.reasoning || 'AI categorization',
+          isTaxDeductible: false,
+          businessUsePercentage: 0,
+          taxCategory: 'Personal'
+        };
+      });
+
+    } catch (error) {
+      console.error('❌ Categorization failed:', error);
+      
+      // Return fallback categorizations
+      return transactions.map(t => ({
+        description: t.description,
+        category: selectedCategories[0] || 'Other',
+        subcategory: 'General',
+        confidence: 0.3,
+        isNewCategory: false,
+        reasoning: 'Fallback categorization due to error',
+        isTaxDeductible: false,
+        businessUsePercentage: 0,
+        taxCategory: 'Personal'
+      }));
+    }
   }
 
   /**

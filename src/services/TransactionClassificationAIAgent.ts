@@ -1010,6 +1010,144 @@ Respond in JSON format:
   }
 
   /**
+   * Bulk categorize transactions into user-selected categories (NEW - CATEGORIZATION FOCUSED)
+   */
+  async bulkCategorizeTransactions(
+    transactions: any[],
+    selectedCategories: string[],
+    context: AIDataContext
+  ): Promise<any[]> {
+    if (!transactions || transactions.length === 0) {
+      throw new Error('No transactions provided for categorization');
+    }
+
+    console.log(`🎯 Bulk categorizing ${transactions.length} transactions into user-selected categories: ${selectedCategories.join(', ')}`);
+
+    // Optimize transactions data - remove unnecessary fields to save tokens
+    const optimizedTransactions = transactions.map(t => ({
+      description: t.description,
+      amount: Math.abs(t.amount), // Remove negative signs, just use amount
+      // Remove date if not needed for categorization
+      // Remove merchant if "Unknown"
+      ...(t.merchant && t.merchant !== 'Unknown' ? { merchant: t.merchant } : {})
+    }));
+
+    const prompt = this.formatPrompt(`
+You are an expert at categorizing business transactions. Categorize these transactions into the user's selected categories.
+
+User's Selected Categories: {{selectedCategories}}
+
+Business Type: {{businessType}}
+
+Transactions to categorize:
+{{transactions}}
+
+Instructions:
+1. Match each transaction to the BEST category from the user's selected categories
+2. If no selected category fits well, suggest a new category
+3. Focus on business expense categorization
+4. Consider tax deductibility for business expenses
+
+Respond with a JSON array, one object per transaction:
+[
+  {
+    "description": "transaction description",
+    "category": "selected category name or new suggestion",
+    "confidence": 0.85,
+    "isNewCategory": false,
+    "reasoning": "brief explanation",
+    "isTaxDeductible": true,
+    "businessUsePercentage": 75
+  }
+]
+`, {
+      selectedCategories: selectedCategories.join(', '),
+      businessType: context.userProfile.businessType || 'Individual',
+      transactions: JSON.stringify(optimizedTransactions, null, 2)
+    });
+
+    try {
+      const response = await this.retryWithBackoff(async () => {
+        const completion = await this.openai.chat.completions.create({
+          model: this.config.model,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a financial categorization expert. Provide accurate categorization based on transaction descriptions and user preferences.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: Math.min(4000, transactions.length * 100), // Scale tokens with transaction count
+          temperature: 0.1, // Very low temperature for consistent categorization
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) {
+          throw new Error('No response from OpenAI');
+        }
+
+        try {
+          return JSON.parse(content);
+        } catch (error) {
+          throw new Error(`Failed to parse AI response: ${content}`);
+        }
+      });
+
+      console.log(`✅ Successfully categorized ${transactions.length} transactions`);
+      return response;
+
+    } catch (error) {
+      console.error('❌ Bulk categorization failed:', error);
+      
+      // Intelligent fallback categorization
+      return transactions.map(t => ({
+        description: t.description,
+        category: this.getFallbackCategory(t.description, selectedCategories),
+        confidence: 0.3,
+        isNewCategory: false,
+        reasoning: 'Fallback categorization due to AI failure',
+        isTaxDeductible: false,
+        businessUsePercentage: 0
+      }));
+    }
+  }
+
+  /**
+   * Get fallback category when AI fails
+   */
+  private getFallbackCategory(description: string, selectedCategories: string[]): string {
+    const desc = description.toLowerCase();
+    
+    // Try to match with selected categories first
+    for (const category of selectedCategories) {
+      const categoryWords = category.toLowerCase().split(' ');
+      if (categoryWords.some(word => word.length > 3 && desc.includes(word))) {
+        return category;
+      }
+    }
+    
+    // Basic pattern matching fallback
+    if (desc.includes('fuel') || desc.includes('gas') || desc.includes('transport')) {
+      return selectedCategories.find(c => c.toLowerCase().includes('transport') || c.toLowerCase().includes('fuel')) || 'Fuel & Transport';
+    }
+    if (desc.includes('office') || desc.includes('supplies') || desc.includes('stationery')) {
+      return selectedCategories.find(c => c.toLowerCase().includes('office') || c.toLowerCase().includes('supplies')) || 'Office Supplies';
+    }
+    if (desc.includes('food') || desc.includes('restaurant') || desc.includes('meal')) {
+      return selectedCategories.find(c => c.toLowerCase().includes('meal') || c.toLowerCase().includes('entertainment')) || 'Meals & Entertainment';
+    }
+    if (desc.includes('marketing') || desc.includes('advertising')) {
+      return selectedCategories.find(c => c.toLowerCase().includes('marketing')) || 'Marketing';
+    }
+    if (desc.includes('tech') || desc.includes('software') || desc.includes('computer')) {
+      return selectedCategories.find(c => c.toLowerCase().includes('tech') || c.toLowerCase().includes('technology')) || 'Technology';
+    }
+    
+    // Default to first selected category
+    return selectedCategories[0] || 'Other';
+  }
+
+  /**
    * Get historical transactions for a specific merchant
    */
   private async getHistoricalTransactions(userId: string, merchant?: string): Promise<any[]> {

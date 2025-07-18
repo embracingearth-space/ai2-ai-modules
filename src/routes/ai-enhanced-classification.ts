@@ -92,6 +92,32 @@ router.post('/classify-enhanced', async (req: any, res: any) => {
       });
     }
 
+    // ✅ FIX: Transform userContext to AIDataContext format that AI services expect
+    const safeUserContext = {
+      userId: 'api-user',
+      userProfile: {
+        businessType: userContext?.businessType || 'SOLE_TRADER',
+        industry: userContext?.industry || 'General',
+        commonExpenses: [],
+        incomeSources: [],
+        taxPreferences: [],
+        learningPreferences: []
+      },
+      historicalData: [],
+      learningFeedback: [],
+      preferences: {
+        countryCode: userContext?.countryCode || 'AU',
+        profession: userContext?.profession || 'General'
+      },
+      preferredCategories: userContext?.preferredCategories || [],
+      customCategories: userContext?.customCategories || []
+    };
+
+    console.log('🔍 Enhanced Classification - User Context:', {
+      businessType: safeUserContext.userProfile.businessType,
+      industry: safeUserContext.userProfile.industry
+    });
+
     const config = getAIConfig();
     
     // If no OpenAI API key, return enhanced mock response
@@ -119,26 +145,36 @@ router.post('/classify-enhanced', async (req: any, res: any) => {
     // Step 1: Enhanced Transaction Classification
     const classification = await classificationAgent.classifyTransaction(
       transaction,
-      userContext
+      safeUserContext
     );
 
     // Step 2: Tax Deductibility Analysis (if requested)
     let taxAnalysis = null;
     if (classificationRequest.includeTaxAnalysis) {
       taxAnalysis = await taxService.analyzeTaxDeductibility(
-        transaction,
-        classification.category,
-        userContext
+        transaction.description,
+        transaction.amount,
+        new Date(transaction.date),
+        classification.transactionNature,
+        {
+          countryCode: userContext?.countryCode || 'AU',
+          occupation: userContext?.profession || 'General',
+          businessType: userContext?.businessType || 'SOLE_TRADER',
+          industry: userContext?.industry || 'General',
+          taxResidency: userContext?.countryCode || 'AU',
+          commonDeductions: [],
+          excludedCategories: []
+        }
       );
     }
 
     // Step 3: Category Optimization with User Preferences
-    const categoryAnalysis = await categoriesAgent.categorizeTransaction(
-      transaction,
-      classification.category,
-      userContext.preferredCategories,
-      userContext.customCategories
-    );
+    const categoryAnalysis = await categoriesAgent.categorizeTransaction({
+      description: transaction.description,
+      amount: transaction.amount,
+      merchant: transaction.merchant,
+      classification: classification.transactionNature
+    });
 
     // Step 4: Build Enhanced Response
     const enhancedResult = buildEnhancedResponse(

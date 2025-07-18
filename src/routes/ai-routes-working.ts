@@ -93,8 +93,12 @@ router.get('/test', (req: any, res: any) => {
 /**
  * Generate mock classification for testing/development
  */
-function generateMockClassification(description: string, amount: number, type?: string) {
+function generateMockClassification(description: string, amount: number, type?: string, userPreferences?: any) {
   const desc = description.toLowerCase();
+  
+  // Check user preferences for category matching
+  const preferredCategories = userPreferences?.preferredCategories || [];
+  const allowCategorySuggestions = userPreferences?.allowCategorySuggestions !== false;
   
   // Smart mock categorization based on description patterns
   let category = 'Business Expense';
@@ -102,6 +106,9 @@ function generateMockClassification(description: string, amount: number, type?: 
   let confidence = 0.6;
   let isTaxDeductible = false;
   let businessUsePercentage = 0;
+  let isNewCategory = false;
+  let newCategoryReason = '';
+  let suggestedCategory = category;
   
   // Office & Tech
   if (desc.includes('office') || desc.includes('computer') || desc.includes('software')) {
@@ -144,16 +151,43 @@ function generateMockClassification(description: string, amount: number, type?: 
     businessUsePercentage = 0;
   }
 
+  // Check if we should suggest a new category
+  if (allowCategorySuggestions && preferredCategories.length > 0) {
+    const matchesPreferred = preferredCategories.some((prefCat: string) => 
+      category.toLowerCase().includes(prefCat.toLowerCase()) || 
+      prefCat.toLowerCase().includes(category.toLowerCase())
+    );
+    
+    if (!matchesPreferred && Math.random() > 0.8) { // 20% chance of new category suggestion
+      isNewCategory = true;
+      suggestedCategory = `${description.split(' ')[0]} Services`; // Create from first word
+      newCategoryReason = `This transaction type appears to be recurring but doesn't match your existing preferred categories. A dedicated category would improve accuracy.`;
+      confidence = 0.75;
+    } else if (matchesPreferred) {
+      // Use preferred category if it matches
+      suggestedCategory = preferredCategories.find((prefCat: string) => 
+        category.toLowerCase().includes(prefCat.toLowerCase()) || 
+        prefCat.toLowerCase().includes(category.toLowerCase())
+      ) || category;
+      confidence = Math.min(confidence + 0.2, 1.0); // Boost confidence for preferred categories
+    }
+  }
+
   return {
-    category,
+    category: isNewCategory ? null : suggestedCategory,
+    suggestedCategory: suggestedCategory,
     subcategory,
     confidence,
-    reasoning: `[MOCK] Pattern-based classification from: "${description}"`,
+    reasoning: isNewCategory ? 
+      `AI suggests creating new category "${suggestedCategory}" as no existing category closely matches this transaction type` :
+      `[MOCK] Pattern-based classification from: "${description}"${preferredCategories.length > 0 ? ' with user preferences' : ''}`,
     isTaxDeductible,
     businessUsePercentage,
     taxCategory: isTaxDeductible ? 'Business Deduction' : 'Non-deductible',
     suggestedBillName: generateBillName(description),
-    isRecurring: detectRecurringPattern(description)
+    isRecurring: detectRecurringPattern(description),
+    isNewCategory,
+    newCategoryReason: isNewCategory ? newCategoryReason : undefined
   };
 }
 
@@ -338,7 +372,7 @@ router.post('/classify', validateInput, async (req: any, res: any) => {
 
 // Helper functions for enhanced processing
 async function processSingleTransactionMock(description: string, amount: number, type?: string, merchant?: string, date?: string, userPreferences?: any) {
-  const classification = generateMockClassification(description, amount, type);
+  const classification = generateMockClassification(description, amount, type, userPreferences);
   
   // Create user profile context separately
   const userProfile = userPreferences ? {

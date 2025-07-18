@@ -17,6 +17,7 @@ import helmet from 'helmet';
 // Temporarily disable problematic imports to get basic routes working
 // import { featureFlags } from './shared-mock';  
 import aiRoutes from './routes/ai-routes-working';
+import optimizedRoutes from './routes/ai-batch-optimized';
 // import logRoutes from './routes/log-routes'; // Temporarily disabled to avoid compilation issues
 
 const app = express();
@@ -102,6 +103,9 @@ app.use((req, res, next) => {
 // 🧠 AI CLASSIFICATION ROUTES - CRITICAL: Mount the main AI routes  
 app.use('/', aiRoutes);
 
+// 🚀 OPTIMIZED BATCH ROUTES - Mount the missing optimized batch processing
+app.use('/api/optimized', optimizedRoutes);
+
 // 🔥 USER-SPECIFIC ANALYZE ENDPOINT - MUST BE BEFORE OTHER ROUTES
 // This handles requests like /cmd30zpi3000kp9iwwcj0w66b/analyze
 app.post('/:userId/analyze', async (req, res) => {
@@ -171,8 +175,8 @@ import aiSimpleRoutes from './routes/ai-simple';
 app.use('/api/simple', aiSimpleRoutes);
 
 // Mount optimized batch processing routes
-import aiOptimizedRoutes from './routes/ai-batch-optimized';
-app.use('/api/optimized', aiOptimizedRoutes);
+// import aiOptimizedRoutes from './routes/ai-batch-optimized'; // This line is now redundant as optimizedRoutes is imported directly
+app.use('/api/optimized', optimizedRoutes);
 
 // Mount enhanced classification routes
 import aiEnhancedRoutes from './routes/ai-enhanced-classification';

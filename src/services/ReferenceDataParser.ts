@@ -37,7 +37,7 @@ export interface TransactionAnalysisResult {
   taxCategory: string;
   isBill: boolean;
   isRecurring: boolean;
-  source: 'reference' | 'ai' | 'pattern' | 'learned';
+  source: 'reference' | 'ai' | 'pattern' | 'learned' | 'ai-categorization';
   reasoning: string;
   merchant?: string;
   billType?: string;
