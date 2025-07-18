@@ -396,7 +396,7 @@ export class BatchProcessingEngine {
     }));
 
     // Create categorization prompt
-    const prompt = `You are an AI assistant helping to categorize financial transactions.
+    const prompt = `Helpcategorize financial transactions.
 
 User's categories: ${selectedCategories.join(', ')}
 
@@ -411,7 +411,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
 [
   {
     "description": "transaction description",
-    "category": "assigned category from user's list",
+    "category": "assigned category from user's list if fitting",
     "confidence": 0.0-1.0,
     "isNewCategory": false,
     "newCategoryName": null,

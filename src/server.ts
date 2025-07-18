@@ -18,6 +18,7 @@ import helmet from 'helmet';
 // import { featureFlags } from './shared-mock';  
 import aiRoutes from './routes/ai-routes-working';
 import optimizedRoutes from './routes/ai-batch-optimized';
+import simpleRoutes from './routes/ai-simple';
 // import logRoutes from './routes/log-routes'; // Temporarily disabled to avoid compilation issues
 
 const app = express();
@@ -105,6 +106,9 @@ app.use('/', aiRoutes);
 
 // 🚀 OPTIMIZED BATCH ROUTES - Mount the missing optimized batch processing
 app.use('/api/optimized', optimizedRoutes);
+
+// 🎯 SIMPLE AI ROUTES - Mount the simple categorization routes
+app.use('/api/simple', simpleRoutes);
 
 // 🔥 USER-SPECIFIC ANALYZE ENDPOINT - MUST BE BEFORE OTHER ROUTES
 // This handles requests like /cmd30zpi3000kp9iwwcj0w66b/analyze
