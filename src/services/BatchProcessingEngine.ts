@@ -429,7 +429,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
       }
 
       const response = await openai.chat.completions.create({
-        model: process.env.AI_MODEL || 'gpt-3.5-turbo',
+        model: process.env.AI_MODEL || 'gpt-4',
         messages: [
           {
             role: 'system',
