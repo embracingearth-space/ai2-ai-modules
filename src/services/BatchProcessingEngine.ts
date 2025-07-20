@@ -427,6 +427,11 @@ export class BatchProcessingEngine {
     // Build comprehensive user context information
     const userProfile = context.userProfile;
     
+    // Debug: Log incoming user profile data
+    console.log('🔍 DEBUG - Incoming User Profile Data:');
+    console.log('Raw userProfile:', JSON.stringify(userProfile, null, 2));
+    console.log('Raw context.preferences:', JSON.stringify(context.preferences, null, 2));
+    
     // Extract all available profile information
     const businessType = userProfile?.businessType || 'INDIVIDUAL';
     const industry = userProfile?.industry || 'General';
@@ -435,6 +440,15 @@ export class BatchProcessingEngine {
     
     // Get AI context from user profile (enhanced integration)
     const aiContextInput = (userProfile as any)?.aiContextInput || context.preferences?.aiContextInput;
+    
+    // Debug: Log extracted profile components
+    console.log('🔍 DEBUG - Extracted Profile Components:');
+    console.log(`Business Type: "${businessType}"`);
+    console.log(`Industry: "${industry}"`);
+    console.log(`Profession: "${profession}"`);
+    console.log(`Country Code: "${countryCode}"`);
+    console.log(`AI Context Input: "${aiContextInput}"`);
+    console.log('===================================================');
     
     // Build comprehensive user profile context
     const userProfileContext = [
@@ -473,14 +487,29 @@ Respond with a JSON array where each element corresponds to a transaction in ord
     try {
       console.log(`🤖 Sending categorization request for ${transactions.length} transactions`);
       
+      // Debug: Log the complete user profile context
+      console.log('🔍 DEBUG - User Profile Context Being Sent:');
+      console.log('===================================================');
+      console.log(userProfileContext);
+      console.log('===================================================');
+      
+      // Debug: Log the complete prompt
+      console.log('🔍 DEBUG - Complete AI Prompt:');
+      console.log('===================================================');
+      console.log(prompt);
+      console.log('===================================================');
+      
       // Use the AI agent's OpenAI instance directly
       const openai = (this.aiAgent as any).openai;
       if (!openai) {
         throw new Error('OpenAI client not available');
       }
 
+      const modelToUse = 'gpt-4'; // Force GPT-4 explicitly
+      console.log(`🤖 Using AI Model: ${modelToUse}`);
+
       const response = await openai.chat.completions.create({
-        model: process.env.AI_MODEL || 'gpt-4',
+        model: modelToUse,
         messages: [
           {
             role: 'system',
