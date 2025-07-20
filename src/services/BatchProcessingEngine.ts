@@ -123,11 +123,15 @@ export class BatchProcessingEngine {
     
     console.log(`🚀 Starting batch processing of ${transactions.length} transactions`);
     
-    // 🎯 SMART CATEGORIZATION MODE: Skip reference data phase and use AI with selected categories
-    if (options.enableCategorization && options.selectedCategories && options.selectedCategories.length > 0) {
-      console.log(`🎯 SMART CATEGORIZATION MODE: Using AI with selected categories: ${options.selectedCategories.join(', ')}`);
+    // 🎯 SMART CATEGORIZATION MODE: Always use categorization when enableCategorization is true
+    if (options.enableCategorization) {
+      const categoryInfo = options.selectedCategories && options.selectedCategories.length > 0 
+        ? `Using AI with selected categories: ${options.selectedCategories.join(', ')}`
+        : 'Using AI with open categorization (no category constraints)';
       
-      // For smart categorization, process ALL transactions with AI to use selected categories
+      console.log(`🎯 SMART CATEGORIZATION MODE: ${categoryInfo}`);
+      
+      // For smart categorization, process ALL transactions with AI (with or without category constraints)
       const aiResults = await this.processWithAI(transactions, options);
       
       // Skip reference data classification and use only AI results
@@ -307,14 +311,19 @@ export class BatchProcessingEngine {
       // 🚀 NEW OPTIMIZATION: Process entire batch in single API call
       if (this.aiAgent && batch.length > 0) {
         try {
-          // 🎯 Check if we should use categorization mode
-          if (options.enableCategorization && options.selectedCategories && options.selectedCategories.length > 0) {
-            console.log(`🎯 Using CATEGORIZATION mode with categories: ${options.selectedCategories.join(', ')}`);
+          // 🎯 Always use categorization mode when enableCategorization is true
+          if (options.enableCategorization) {
+            const selectedCategories = options.selectedCategories || [];
+            const categoryInfo = selectedCategories.length > 0 
+              ? `with selected categories: ${selectedCategories.join(', ')}`
+              : 'with open categorization (no category constraints)';
             
-            // Call the categorization method instead of classification
+            console.log(`🎯 Using CATEGORIZATION mode ${categoryInfo}`);
+            
+            // Call the categorization method (with or without category constraints)
             const categorizations = await this.categorizeBatchTransactions(
               batch,
-              options.selectedCategories,
+              selectedCategories, // Pass empty array for open categorization
               context
             );
             
@@ -343,44 +352,39 @@ export class BatchProcessingEngine {
             console.log(`✅ Categorized ${batch.length} transactions with 1 API call`);
             
           } else {
-            // Original classification logic (bill vs expense)
-            console.log(`🔄 Processing batch of ${batch.length} transactions with single AI call`);
+            // 🚨 FIXED: When no categories selected, use categorization mode with empty categories for open analysis
+            console.log(`🔄 FIXED: No categories selected - using open categorization mode for ${batch.length} transactions`);
             
-            const bulkResult = await this.aiAgent.bulkClassifyTransactions(
-              batch.map(t => ({
-                id: t.id,
-                description: t.description,
-                amount: t.amount,
-                merchant: t.merchant,
-                date: t.date
-              })),
+            // Call categorization method with empty categories for open analysis
+            const categorizations = await this.categorizeBatchTransactions(
+              batch,
+              [], // Empty categories = open analysis, AI can suggest any categories
               context
             );
             
-            // Map bulk results to our standard format
-            bulkResult.classified.forEach((aiResult: any) => {
-              const transaction = batch.find(t => t.id === aiResult.transactionId);
-              if (!transaction) return;
-              
+            // Convert categorization results to standard format
+            categorizations.forEach((catResult, index) => {
+              const transaction = batch[index];
               const standardResult: TransactionAnalysisResult = {
                 transactionId: transaction.id,
-                category: aiResult.transactionNature || 'Uncategorized',
-                subcategory: aiResult.subcategory || 'General',
-                confidence: aiResult.confidence || 0.7,
-                isTaxDeductible: false,
-                source: 'ai',
-                businessUsePercentage: 0,
-                taxCategory: 'Personal',
-                isBill: (aiResult.classification === 'bill') || false,
-                isRecurring: aiResult.recurring || false,
-                estimatedFrequency: aiResult.recurringPattern?.frequency,
-                reasoning: aiResult.reasoning || 'AI batch classification',
+                category: catResult.category || 'Uncategorized',
+                subcategory: catResult.subcategory || 'General',
+                confidence: catResult.confidence || 0.7,
+                isTaxDeductible: catResult.isTaxDeductible || false,
+                source: 'ai-categorization' as TransactionAnalysisResult['source'],
+                businessUsePercentage: catResult.businessUsePercentage || 0,
+                taxCategory: catResult.taxCategory || 'Personal',
+                isBill: false, // Not relevant for categorization
+                isRecurring: false, // Not relevant for categorization
+                reasoning: catResult.reasoning || 'AI categorization (open analysis)',
                 primaryType: transaction.type === 'credit' ? 'income' : 'expense',
                 processedAt: new Date().toISOString(),
               };
               
               results.push(standardResult);
             });
+            
+            console.log(`✅ Used open categorization for ${batch.length} transactions with 1 API call (no individual calls!)`);
           }
           
           // 📊 COST TRACKING: Only 1 API call for entire batch
@@ -470,7 +474,7 @@ User's categories: ${selectedCategories.join(', ')}
 Transactions to categorize:
 ${JSON.stringify(optimizedTransactions, null, 2)}
 
-Consider the user's business type, industry, profession, country, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context. If none of the categories fit well, you may suggest a new category.
+Consider the user's business type, industry, profession, country, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context but do not try to fit user categories, suggest a new category if not fitting easily.
 
 Respond with a JSON array where each element corresponds to a transaction in order:
 [
