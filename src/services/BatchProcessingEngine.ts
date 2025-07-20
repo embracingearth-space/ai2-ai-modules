@@ -424,41 +424,49 @@ export class BatchProcessingEngine {
       amount: t.amount
     }));
 
-    // Build user context information
+    // Build comprehensive user context information
     const userProfile = context.userProfile;
-    const businessContext = userProfile?.businessType ? `Business Type: ${userProfile.businessType}` : '';
-    const industryContext = userProfile?.industry ? `Industry: ${userProfile.industry}` : '';
+    
+    // Extract all available profile information
+    const businessType = userProfile?.businessType || 'INDIVIDUAL';
+    const industry = userProfile?.industry || 'General';
+    const profession = (userProfile as any)?.profession || '';
+    const countryCode = (userProfile as any)?.countryCode || 'AU';
     
     // Get AI context from user profile (enhanced integration)
     const aiContextInput = (userProfile as any)?.aiContextInput || context.preferences?.aiContextInput;
-    const psychologyContext = aiContextInput ? `User Context: ${aiContextInput}` : '';
     
-    const contextInfo = [businessContext, industryContext, psychologyContext]
-      .filter(Boolean)
-      .join('\n');
+    // Build comprehensive user profile context
+    const userProfileContext = [
+      `Business Type: ${businessType}`,
+      `Industry: ${industry}`,
+      profession ? `Profession: ${profession}` : null,
+      countryCode ? `Country: ${countryCode}` : null,
+      aiContextInput ? `User Context: ${aiContextInput}` : null
+    ].filter(Boolean).join('\n');
 
-    // Create enhanced categorization prompt matching user's preferred format
+    // Create enhanced categorization prompt with full user profile
     const prompt = `Help categorize financial transactions based on user's business profile and preferences.
 
 User Profile:
-${businessContext || 'Business Type: INDIVIDUAL'}
-${industryContext || 'Industry: General'}
-${psychologyContext ? psychologyContext : ''}
+${userProfileContext}
 
 User's categories: ${selectedCategories.join(', ')}
 
 Transactions to categorize:
 ${JSON.stringify(optimizedTransactions, null, 2)}
 
-Consider the user's business type, industry, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context. If none of the categories fit well, assign to the closest available category.
+Consider the user's business type, industry, profession, country, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context. If none of the categories fit well, you may suggest a new category.
 
 Respond with a JSON array where each element corresponds to a transaction in order:
 [
   {
     "description": "transaction description",
-    "category": "assigned category from user's list",
+    "category": "assigned category from user's list if fitting",
     "confidence": 0.0-1.0,
-    "reasoning": "brief explanation of categorization choice"
+    "isNewCategory": false,
+    "newCategoryName": null,
+    "reasoning": "1-2 word explanation"
   }
 ]`;
 
@@ -504,6 +512,8 @@ Respond with a JSON array where each element corresponds to a transaction in ord
           subcategory: 'General',
           confidence: aiResult.confidence || 0.7,
           reasoning: aiResult.reasoning || 'AI categorization',
+          isNewCategory: aiResult.isNewCategory || false,
+          newCategoryName: aiResult.newCategoryName || null,
           isTaxDeductible: false,
           businessUsePercentage: 0,
           taxCategory: 'Personal'
