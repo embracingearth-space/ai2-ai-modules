@@ -429,39 +429,36 @@ export class BatchProcessingEngine {
     const businessContext = userProfile?.businessType ? `Business Type: ${userProfile.businessType}` : '';
     const industryContext = userProfile?.industry ? `Industry: ${userProfile.industry}` : '';
     
-    // Get AI context from preferences if available
-    const preferences = context.preferences;
-    const psychologyContext = preferences?.aiContextInput ? `User Context: ${preferences.aiContextInput}` : '';
+    // Get AI context from user profile (enhanced integration)
+    const aiContextInput = (userProfile as any)?.aiContextInput || context.preferences?.aiContextInput;
+    const psychologyContext = aiContextInput ? `User Context: ${aiContextInput}` : '';
     
     const contextInfo = [businessContext, industryContext, psychologyContext]
       .filter(Boolean)
       .join('\n');
 
-    // Create categorization prompt with enhanced user context
+    // Create enhanced categorization prompt matching user's preferred format
     const prompt = `Help categorize financial transactions based on user's business profile and preferences.
 
-${contextInfo ? `User Profile:
-${contextInfo}
+User Profile:
+${businessContext || 'Business Type: INDIVIDUAL'}
+${industryContext || 'Industry: General'}
+${psychologyContext ? psychologyContext : ''}
 
-` : ''}User's categories: ${selectedCategories.join(', ')}
+User's categories: ${selectedCategories.join(', ')}
 
 Transactions to categorize:
 ${JSON.stringify(optimizedTransactions, null, 2)}
 
-Consider the user's business type, industry, and personal context when categorizing transactions.
-For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma.
-If a transaction could fit multiple categories, choose the BEST match based on the user's context.
-If none of the categories fit well, you may suggest a new category.
+Consider the user's business type, industry, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context. If none of the categories fit well, assign to the closest available category.
 
 Respond with a JSON array where each element corresponds to a transaction in order:
 [
   {
     "description": "transaction description",
-    "category": "assigned category from user's list if fitting",
+    "category": "assigned category from user's list",
     "confidence": 0.0-1.0,
-    "isNewCategory": false,
-    "newCategoryName": null,
-    "reasoning": "1-2 word explanation"
+    "reasoning": "brief explanation of categorization choice"
   }
 ]`;
 
@@ -506,8 +503,6 @@ Respond with a JSON array where each element corresponds to a transaction in ord
           category: aiResult.category || selectedCategories[0] || 'Other',
           subcategory: 'General',
           confidence: aiResult.confidence || 0.7,
-          isNewCategory: aiResult.isNewCategory || false,
-          newCategoryName: aiResult.newCategoryName,
           reasoning: aiResult.reasoning || 'AI categorization',
           isTaxDeductible: false,
           businessUsePercentage: 0,
