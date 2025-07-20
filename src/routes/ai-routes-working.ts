@@ -471,18 +471,166 @@ async function processBatchTransactionsMock(transactions: any[], userPreferences
   };
 }
 
-async function processSingleTransactionReal(description: string, amount: number, type?: string, merchant?: string, date?: string, userPreferences?: any, services?: any) {
-  // Real AI processing implementation would go here
-  return {
-    classification: generateMockClassification(description, amount, type),
-    billAnalysis: detectBillPatternMock(description, amount, merchant),
-    analysisType: 'single'
-  };
+// 🚀 REAL AI PROCESSING FUNCTIONS
+
+async function processSingleTransactionReal(
+  description: string, 
+  amount: number, 
+  type?: string, 
+  merchant?: string, 
+  date?: string, 
+  userPreferences?: any, 
+  services?: any
+) {
+  console.log('🤖 Processing single transaction with REAL AI:', { description, amount, merchant });
+  
+  try {
+    const { classificationAgent } = services;
+    
+    // Prepare user context
+    const userProfile = {
+      businessType: userPreferences?.businessType || 'Individual',
+      industry: userPreferences?.industry || 'General',
+      countryCode: userPreferences?.countryCode || 'AU',
+      profession: userPreferences?.profession || 'General'
+    };
+
+    const context = {
+      userProfile,
+      preferredCategories: userPreferences?.preferredCategories || [],
+      historicalTransactions: []
+    };
+
+    // Call real AI classification
+    const aiResult = await classificationAgent.classifyTransaction({
+      description,
+      amount,
+      merchant: merchant || 'Unknown',
+      date: date || new Date().toISOString()
+    }, context);
+
+    console.log('✅ Real AI classification result:', aiResult);
+
+    // Map AI result to expected format
+    const classification = {
+      category: aiResult.classification === 'expense' ? 'Business Expense' : 'Income',
+      suggestedCategory: aiResult.classification === 'expense' ? 'Business Expense' : 'Income',
+      subcategory: 'General',
+      confidence: aiResult.confidence || 0.8,
+      reasoning: aiResult.reasoning || 'AI-powered transaction analysis',
+      isTaxDeductible: aiResult.transactionNature === 'BILL' || amount < -50,
+      businessUsePercentage: aiResult.transactionNature === 'BILL' ? 100 : 0,
+      taxCategory: aiResult.transactionNature === 'BILL' ? 'Business Deduction' : 'Non-deductible',
+      suggestedBillName: merchant ? `${merchant} Bill` : 'General Expense',
+      isRecurring: aiResult.recurring || false,
+      isNewCategory: false
+    };
+
+    // Bill analysis
+    const billAnalysis = {
+      isBill: aiResult.transactionNature === 'BILL',
+      isRecurring: aiResult.recurring || false,
+      confidence: aiResult.confidence || 0.8,
+      suggestedBillName: classification.suggestedBillName,
+      pattern: aiResult.recurringPattern ? {
+        type: 'utilities',
+        frequency: aiResult.recurrencePattern?.toLowerCase() || 'monthly',
+        estimatedAmount: amount,
+        merchant: merchant || 'Unknown'
+      } : null,
+      recommendations: []
+    };
+
+    return {
+      classification,
+      billAnalysis,
+      userProfile,
+      analysisType: 'single',
+      openai_calls: 1,
+      tokens_used: 150, // Estimate
+      cost_estimate: 0.01
+    };
+
+  } catch (error) {
+    console.error('❌ Real AI processing failed:', error);
+    // Fallback to mock if AI fails
+    const mockResult = await processSingleTransactionMock(description, amount, type, merchant, date, userPreferences);
+    return {
+      ...mockResult,
+      error: 'AI processing failed, using fallback',
+      fallback: true
+    };
+  }
 }
 
-async function processBatchTransactionsReal(transactions: any[], userPreferences?: any, services?: any) {
-  // Real AI batch processing implementation would go here
-  return processBatchTransactionsMock(transactions, userPreferences);
+async function processBatchTransactionsReal(
+  transactions: any[], 
+  userPreferences?: any, 
+  services?: any
+) {
+  console.log('🤖 Processing batch transactions with REAL AI:', transactions.length, 'transactions');
+  
+  const results = [];
+  let totalOpenAICalls = 0;
+  let totalTokens = 0;
+  
+  try {
+    // Process each transaction with real AI
+    for (const tx of transactions) {
+      const result = await processSingleTransactionReal(
+        tx.description, 
+        tx.amount, 
+        tx.type, 
+        tx.merchant, 
+        tx.date, 
+        userPreferences, 
+        services
+      );
+      
+      results.push({
+        transactionId: tx.id || 'tx-' + Date.now() + '-' + Math.random(),
+        ...result
+      });
+      
+      if (result.openai_calls) {
+        totalOpenAICalls += result.openai_calls;
+        totalTokens += result.tokens_used || 0;
+      }
+    }
+
+    // Detect bill patterns across results
+    const billPatterns = results
+      .filter(r => r.billAnalysis?.isBill)
+      .map(r => ({
+        merchant: r.billAnalysis?.pattern?.merchant || 'Unknown',
+        pattern: r.billAnalysis?.pattern,
+        confidence: r.billAnalysis?.confidence || 0
+      }));
+
+    return {
+      results,
+      billPatterns,
+      summary: {
+        total: transactions.length,
+        processed: results.length,
+        billsDetected: billPatterns.length,
+        openai_calls: totalOpenAICalls,
+        tokens_used: totalTokens,
+        cost_estimate: (totalTokens / 1000) * 0.01
+      },
+      analysisType: 'batch'
+    };
+
+  } catch (error) {
+    console.error('❌ Batch AI processing failed:', error);
+    // Fallback to mock processing
+    const mockResult = await processBatchTransactionsMock(transactions, userPreferences);
+    return {
+      ...mockResult,
+      error: 'AI batch processing failed, using fallback',
+      fallback: true
+    };
+  }
 }
 
 // Enhanced bill pattern detection

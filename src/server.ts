@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load environment variables from the correct path
-dotenv.config({ path: path.join(process.cwd(), '.env') });
+// Load environment variables from the correct path (parent directory)
+dotenv.config({ path: path.join(process.cwd(), '..', '.env') });
 
 // 🔧 VERIFY OPENAI API KEY IS LOADED
 console.log('🔑 OpenAI API Key Status:', process.env.OPENAI_API_KEY ? 'CONFIGURED' : 'NOT CONFIGURED');

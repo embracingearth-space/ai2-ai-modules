@@ -123,7 +123,36 @@ export class BatchProcessingEngine {
     
     console.log(`🚀 Starting batch processing of ${transactions.length} transactions`);
     
-    // Phase 1: Reference Data Classification
+    // 🎯 SMART CATEGORIZATION MODE: Skip reference data phase and use AI with selected categories
+    if (options.enableCategorization && options.selectedCategories && options.selectedCategories.length > 0) {
+      console.log(`🎯 SMART CATEGORIZATION MODE: Using AI with selected categories: ${options.selectedCategories.join(', ')}`);
+      
+      // For smart categorization, process ALL transactions with AI to use selected categories
+      const aiResults = await this.processWithAI(transactions, options);
+      
+      // Skip reference data classification and use only AI results
+      const allResults = aiResults;
+      const recurringBills = this.detectRecurringBills(allResults, transactions);
+      const insights = this.generateInsights(allResults, transactions);
+      const costBreakdown = this.calculateCostBreakdown(0, aiResults.length, transactions.length);
+      
+      const processingTimeMs = Date.now() - startTime;
+      
+      return {
+        totalTransactions: transactions.length,
+        processedWithReferenceData: 0, // No reference data in smart categorization mode
+        processedWithAI: aiResults.length,
+        cachedResults: 0,
+        totalCost: this.processingStats.totalCost,
+        results: allResults,
+        recurringBills,
+        insights,
+        costBreakdown,
+        processingTimeMs
+      };
+    }
+    
+    // Standard mode: Phase 1: Reference Data Classification
     const { classifiedTransactions, unclassifiedTransactions } = await this.classifyWithReferenceData(
       transactions, 
       options.confidenceThreshold

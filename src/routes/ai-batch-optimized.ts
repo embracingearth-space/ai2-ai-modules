@@ -186,6 +186,10 @@ router.post('/analyze-batch', async (req: any, res: any) => {
       userNotes: t.userNotes
     }));
 
+    // 🔍 DEBUG: Log incoming options
+    console.log('🔍 DEBUG - Incoming options:', JSON.stringify(options, null, 2));
+    console.log('🔍 DEBUG - Selected categories:', selectedCategories);
+    
     // Configure batch processing options
     const batchOptions: any = { // Assuming BatchProcessingOptions type is not directly imported here
       batchSize: options?.batchSize || 50,
@@ -201,6 +205,8 @@ router.post('/analyze-batch', async (req: any, res: any) => {
         countryCode: 'AU'
       }
     };
+    
+    console.log('🔍 DEBUG - Final batchOptions:', JSON.stringify(batchOptions, null, 2));
 
     const result = await batchEngine.processBatch(batchTransactions, batchOptions);
 
