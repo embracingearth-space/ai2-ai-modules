@@ -425,7 +425,8 @@ export class BatchProcessingEngine {
     // Prepare optimized transaction data (remove unnecessary fields)
     const optimizedTransactions = transactions.map(t => ({
       description: t.description,
-      amount: t.amount
+      amount: t.amount,
+      merchant: t.merchant
     }));
 
     // Build comprehensive user context information
@@ -454,7 +455,7 @@ export class BatchProcessingEngine {
     console.log(`AI Context Input: "${aiContextInput}"`);
     console.log('===================================================');
     
-    // Build comprehensive user profile context
+    // Build comprehensive user profile context with enhanced details
     const userProfileContext = [
       `Business Type: ${businessType}`,
       `Industry: ${industry}`,
@@ -463,38 +464,62 @@ export class BatchProcessingEngine {
       aiContextInput ? `User Context: ${aiContextInput}` : null
     ].filter(Boolean).join('\n');
 
-    // Create enhanced categorization prompt with full user profile
-    const prompt = `Help categorize financial transactions based on user's business profile and preferences.
+    // Create enhanced categorization prompt with comprehensive user context
+    const prompt = `You are an expert financial analyst specializing in transaction categorization for ${countryCode} businesses. Categorize these financial transactions based on the user's complete business profile and preferences.
 
-User Profile:
+COMPREHENSIVE USER PROFILE:
 ${userProfileContext}
 
-User's categories: ${selectedCategories.join(', ')}
+SELECTED CATEGORIES: ${selectedCategories.length > 0 ? selectedCategories.join(', ') : 'OPEN CATEGORIZATION - Suggest best categories based on user profile'}
 
-Transactions to categorize:
+TRANSACTION DATA:
 ${JSON.stringify(optimizedTransactions, null, 2)}
 
-Consider the user's business type, industry, profession, country, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context but do not try to fit user categories, suggest a new category if not fitting easily.
+CATEGORIZATION INSTRUCTIONS:
+1. Consider the user's business type (${businessType}) when determining business vs personal expenses
+2. Apply industry-specific knowledge for ${industry} sector transactions
+3. Use profession-specific insights for ${profession} role if provided
+4. Apply ${countryCode} tax and business regulations
+5. Incorporate the user's specific context and preferences: ${aiContextInput || 'No additional context provided'}
+6. For each transaction, determine:
+   - Most appropriate category (from user's list or suggest new if none fit well)
+   - Tax deductibility based on business context
+   - Business use percentage considering user's profile
+   - Confidence level based on profile match
 
+CATEGORY SELECTION STRATEGY:
+- If user selected specific categories: Choose the BEST match from their list
+- If OPEN categorization: Suggest the most appropriate category for their ${businessType} ${profession} in ${industry}
+- Consider user's context: ${aiContextInput || 'Standard business categorization'}
+- Prioritize tax efficiency for ${countryCode} ${businessType} entities
+
+RESPONSE FORMAT:
 Respond with a JSON array where each element corresponds to a transaction in order:
 [
   {
     "description": "transaction description",
-    "category": "assigned category from user's list if fitting",
+    "category": "assigned category (from user's list if fitting, or suggest new)",
     "confidence": 0.0-1.0,
-    "isNewCategory": false,
-    "newCategoryName": null,
-    "reasoning": "1-2 word explanation"
+    "isNewCategory": true/false,
+    "newCategoryName": "suggested name if new category",
+    "reasoning": "brief explanation considering user profile",
+    "isTaxDeductible": true/false,
+    "businessUsePercentage": 0-100,
+    "taxCategory": "business/personal/mixed"
   }
-]`;
+]
+
+Focus on accuracy for ${profession} in ${industry} sector, considering ${businessType} business structure and user's specific context.`;
 
     try {
-      console.log(`🤖 Sending categorization request for ${transactions.length} transactions`);
+      console.log(`🤖 Sending enhanced categorization request for ${transactions.length} transactions`);
       
-      // Debug: Log the complete user profile context
-      console.log('🔍 DEBUG - User Profile Context Being Sent:');
+      // Debug: Log the complete enhanced user profile context
+      console.log('🔍 DEBUG - Enhanced User Profile Context Being Sent:');
       console.log('===================================================');
       console.log(userProfileContext);
+      console.log('Business Classification Context:', businessType, profession, industry, countryCode);
+      console.log('User AI Context:', aiContextInput);
       console.log('===================================================');
       
       // Debug: Log the complete prompt
@@ -517,15 +542,15 @@ Respond with a JSON array where each element corresponds to a transaction in ord
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful AI assistant that categorizes financial transactions accurately and concisely.'
+            content: `You are an expert financial analyst specializing in ${countryCode} business transaction categorization. You understand ${businessType} business structures and ${industry} sector specifics. Use the user's complete profile to provide accurate, tax-efficient categorization.`
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.3,
-        max_tokens: 2000
+        temperature: 0.2, // Lower temperature for more consistent categorization
+        max_tokens: 3000 // Increased for detailed responses
       });
 
       const content = response.choices[0]?.message?.content;
@@ -536,7 +561,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
       // Parse AI response
       const categorizations = JSON.parse(content);
       
-      // Validate and enhance results
+      // Validate and enhance results with user profile context
       return transactions.map((transaction, index) => {
         const aiResult = categorizations[index] || {};
         return {
@@ -544,29 +569,29 @@ Respond with a JSON array where each element corresponds to a transaction in ord
           category: aiResult.category || selectedCategories[0] || 'Other',
           subcategory: 'General',
           confidence: aiResult.confidence || 0.7,
-          reasoning: aiResult.reasoning || 'AI categorization',
+          reasoning: aiResult.reasoning || `AI categorization for ${profession} in ${industry}`,
           isNewCategory: aiResult.isNewCategory || false,
           newCategoryName: aiResult.newCategoryName || null,
-          isTaxDeductible: false,
-          businessUsePercentage: 0,
-          taxCategory: 'Personal'
+          isTaxDeductible: aiResult.isTaxDeductible || false,
+          businessUsePercentage: aiResult.businessUsePercentage || 0,
+          taxCategory: aiResult.taxCategory || 'Personal'
         };
       });
 
     } catch (error) {
-      console.error('❌ Categorization failed:', error);
+      console.error('❌ Enhanced categorization failed:', error);
       
-      // Return fallback categorizations
+      // Return enhanced fallback categorizations using user profile
       return transactions.map(t => ({
         description: t.description,
-        category: selectedCategories[0] || 'Other',
+        category: selectedCategories[0] || `${industry} Expense`,
         subcategory: 'General',
         confidence: 0.3,
         isNewCategory: false,
-        reasoning: 'Fallback categorization due to error',
-        isTaxDeductible: false,
-        businessUsePercentage: 0,
-        taxCategory: 'Personal'
+        reasoning: `Fallback categorization for ${profession} in ${industry}`,
+        isTaxDeductible: businessType !== 'INDIVIDUAL',
+        businessUsePercentage: businessType !== 'INDIVIDUAL' ? 50 : 0,
+        taxCategory: businessType !== 'INDIVIDUAL' ? 'Business' : 'Personal'
       }));
     }
   }
