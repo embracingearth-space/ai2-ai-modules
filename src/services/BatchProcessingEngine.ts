@@ -376,6 +376,7 @@ export class BatchProcessingEngine {
                 taxCategory: catResult.taxCategory || 'Personal',
                 isBill: false, // Not relevant for categorization
                 isRecurring: false, // Not relevant for categorization
+                secondaryType: catResult.secondaryType || 'one-time expense', // 🎯 ADDED: Use AI result or default
                 reasoning: catResult.reasoning || 'AI categorization',
                 primaryType: transaction.type === 'credit' ? 'income' : 'expense',
                 processedAt: new Date().toISOString(),
@@ -411,6 +412,7 @@ export class BatchProcessingEngine {
                 taxCategory: catResult.taxCategory || 'Personal',
                 isBill: false, // Not relevant for categorization
                 isRecurring: false, // Not relevant for categorization
+                secondaryType: catResult.secondaryType || 'one-time expense', // 🎯 ADDED: Use AI result or default
                 reasoning: catResult.reasoning || 'AI categorization (open analysis)',
                 primaryType: transaction.type === 'credit' ? 'income' : 'expense',
                 processedAt: new Date().toISOString(),
@@ -460,14 +462,17 @@ export class BatchProcessingEngine {
     const requestId = `categorize-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const startTime = Date.now();
     
-    // Log the API request
+    // Log the API request with actual prompt
     logger.logApiRequest(
       'BatchProcessingEngine',
       'openai/chat/completions',
       'POST',
       {
         model: 'gpt-4',
-        messages: [{ role: 'system', content: 'categorization_bot' }, { role: 'user', content: 'batch_categorization' }],
+        messages: [
+          { role: 'system', content: 'You are a financial transaction categorization expert. Analyze transactions and categorize them accurately.' },
+          { role: 'user', content: `Categorize these ${transactions.length} transactions: ${JSON.stringify(transactions.map(t => ({ description: t.description, amount: t.amount, merchant: t.merchant })))}` }
+        ],
         max_tokens: 2000,
         temperature: 0.1
       },
@@ -590,7 +595,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
         throw new Error('No response from AI');
       }
 
-      // Log the API response
+      // Log the API response with actual content
       const duration = Date.now() - startTime;
       const estimatedCost = this.estimateBatchCost(transactions.length);
       logger.logApiResponse(
@@ -605,7 +610,8 @@ Respond with a JSON array where each element corresponds to a transaction in ord
             total_tokens: response.usage?.total_tokens || 0
           },
           response_length: content.length,
-          transaction_count: transactions.length
+          transaction_count: transactions.length,
+          ai_response: content.substring(0, 500) + (content.length > 500 ? '...' : '') // Show first 500 chars of AI response
         },
         200,
         duration,

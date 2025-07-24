@@ -53,13 +53,17 @@ const initializeServices = () => {
   };
 };
 
-// Cache services instance
+// Cache services instance - SINGLETON PATTERN
 let servicesInstance: ReturnType<typeof initializeServices> | null = null;
 
 // Middleware to check AI services availability
 const checkAIServices = (req: any, res: any, next: any) => {
-  const services = initializeServices();
-  if (!services) {
+  // Use cached instance if available
+  if (!servicesInstance) {
+    servicesInstance = initializeServices();
+  }
+  
+  if (!servicesInstance) {
     return res.status(503).json({
       success: false,
       error: 'AI services not configured - missing OpenAI API key',
@@ -68,7 +72,7 @@ const checkAIServices = (req: any, res: any, next: any) => {
       timestamp: new Date().toISOString()
     });
   }
-  req.aiServices = services;
+  req.aiServices = servicesInstance;
   next();
 };
 
@@ -880,7 +884,7 @@ router.post('/orchestrate', validateInput, async (req: any, res: any) => {
       });
     }
 
-    // Initialize services if not already done
+    // Use cached services instance (singleton pattern)
     if (!servicesInstance) {
       servicesInstance = initializeServices();
     }
