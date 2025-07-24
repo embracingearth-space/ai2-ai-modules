@@ -42,7 +42,7 @@ import helmet from 'helmet';
 import aiRoutes from './routes/ai-routes-working';
 import optimizedRoutes from './routes/ai-batch-optimized';
 import simpleRoutes from './routes/ai-simple';
-// import logRoutes from './routes/log-routes'; // Temporarily disabled to avoid compilation issues
+import logRoutes from './routes/logs';
 
 const app = express();
 const PORT = process.env.AI_PORT || 3002;
@@ -122,7 +122,7 @@ app.use((req, res, next) => {
 });
 
 // 📝 API Logging Routes
-// app.use('/api/logs', logRoutes); // Temporarily disabled to avoid compilation issues
+app.use('/api/logs', logRoutes);
 
 // 🧠 AI CLASSIFICATION ROUTES - CRITICAL: Mount the main AI routes  
 app.use('/', aiRoutes);

@@ -18,6 +18,7 @@ import { ReferenceDataParser, TransactionAnalysisResult } from './ReferenceDataP
 import { TransactionClassificationAIAgent } from './TransactionClassificationAIAgent';
 import { AIConfig } from '../types/ai-types';
 import { AIDataContext } from './BaseAIService';
+import { logger } from './LoggingService';
 
 export interface BatchTransaction {
   id: string;
@@ -129,6 +130,12 @@ export class BatchProcessingEngine {
     options: BatchProcessingOptions = this.getDefaultOptions()
   ): Promise<BatchProcessingResult> {
     const startTime = Date.now();
+    const requestId = `batch-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    logger.info('BatchProcessingEngine', `Starting batch processing of ${transactions.length} transactions`, {
+      transactionCount: transactions.length,
+      options: { ...options, userProfile: options.userProfile ? 'present' : 'none' }
+    }, requestId);
     
     console.log(`🚀 Starting batch processing of ${transactions.length} transactions`);
     
@@ -194,6 +201,15 @@ export class BatchProcessingEngine {
     console.log(`🎉 Batch processing completed in ${processingTimeMs}ms`);
     console.log(`💰 Total cost: $${costBreakdown.costPerTransaction * transactions.length}`);
     console.log(`📊 Efficiency: ${costBreakdown.efficiencyRating}%`);
+    
+    // Log completion
+    logger.logPerformance('BatchProcessingEngine', 'batch_processing', processingTimeMs, {
+      totalTransactions: transactions.length,
+      processedWithReferenceData: classifiedTransactions.length,
+      processedWithAI: aiResults.length,
+      efficiency: costBreakdown.efficiencyRating,
+      totalCost: costBreakdown.costPerTransaction * transactions.length
+    }, requestId);
     
     return {
       totalTransactions: transactions.length,
@@ -266,11 +282,21 @@ export class BatchProcessingEngine {
     
     // If no AI agent available, return mock results
     if (!this.aiAgent) {
+      logger.warn('BatchProcessingEngine', 'No AI agent available, using mock results', {
+        transactionCount: transactions.length
+      });
       return this.generateMockAIResults(transactions);
     }
     
     const results: TransactionAnalysisResult[] = [];
     const batches = this.createBatches(transactions, options.batchSize);
+    
+    logger.info('BatchProcessingEngine', `Processing ${batches.length} AI batches with ${options.maxConcurrentBatches} concurrent`, {
+      transactionCount: transactions.length,
+      batchCount: batches.length,
+      batchSize: options.batchSize,
+      maxConcurrentBatches: options.maxConcurrentBatches
+    });
     
     console.log(`🔄 Processing ${batches.length} AI batches with ${options.maxConcurrentBatches} concurrent`);
     
@@ -431,6 +457,23 @@ export class BatchProcessingEngine {
     selectedCategories: string[],
     context: AIDataContext
   ): Promise<any[]> {
+    const requestId = `categorize-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const startTime = Date.now();
+    
+    // Log the API request
+    logger.logApiRequest(
+      'BatchProcessingEngine',
+      'openai/chat/completions',
+      'POST',
+      {
+        model: 'gpt-4',
+        messages: [{ role: 'system', content: 'categorization_bot' }, { role: 'user', content: 'batch_categorization' }],
+        max_tokens: 2000,
+        temperature: 0.1
+      },
+      context.userId,
+      requestId
+    );
     // Prepare optimized transaction data (remove unnecessary fields)
     const optimizedTransactions = transactions.map(t => ({
       description: t.description,
@@ -546,6 +589,30 @@ Respond with a JSON array where each element corresponds to a transaction in ord
       if (!content) {
         throw new Error('No response from AI');
       }
+
+      // Log the API response
+      const duration = Date.now() - startTime;
+      const estimatedCost = this.estimateBatchCost(transactions.length);
+      logger.logApiResponse(
+        'BatchProcessingEngine',
+        'openai/chat/completions',
+        'POST',
+        {
+          model: 'gpt-4',
+          usage: {
+            prompt_tokens: response.usage?.prompt_tokens || 0,
+            completion_tokens: response.usage?.completion_tokens || 0,
+            total_tokens: response.usage?.total_tokens || 0
+          },
+          response_length: content.length,
+          transaction_count: transactions.length
+        },
+        200,
+        duration,
+        estimatedCost,
+        context.userId,
+        requestId
+      );
 
       // Parse AI response
       const categorizations = JSON.parse(content);
