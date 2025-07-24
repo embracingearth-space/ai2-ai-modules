@@ -496,7 +496,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
     "confidence": 0.0-1.0,
     "isNewCategory": false,
     "newCategoryName": null,
-    "reasoning": "1-2 word explanation"
+    "reasoning": "1-7 word explanation"
   }
 ]`;
 
@@ -531,7 +531,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
         messages: [
           {
             role: 'system',
-            content: `You are an expert financial analyst specializing in ${countryCode} business transaction categorization. You understand ${businessType} business structures and ${industry} sector specifics. Use the user's complete profile to provide accurate, tax-efficient categorization.`
+            content: `You are an expert financial analyst specializing in ${countryCode} business transaction categorization. You understand ${businessType} business structures and ${industry} sector specifics.`
           },
           {
             role: 'user',
@@ -553,9 +553,20 @@ Respond with a JSON array where each element corresponds to a transaction in ord
       // Validate and enhance results with user profile context
       return transactions.map((transaction, index) => {
         const aiResult = categorizations[index] || {};
+        
+        // 🎯 Handle new category suggestions properly
+        let finalCategory = aiResult.category;
+        if (aiResult.isNewCategory && aiResult.newCategoryName) {
+          // If AI suggests a new category, use that as the category
+          finalCategory = aiResult.newCategoryName;
+        } else if (!finalCategory) {
+          // Fallback to first selected category or 'Other'
+          finalCategory = selectedCategories[0] || 'Other';
+        }
+        
         return {
           description: transaction.description,
-          category: aiResult.category || selectedCategories[0] || 'Other',
+          category: finalCategory, // 🎯 Use properly resolved category
           subcategory: 'General',
           confidence: aiResult.confidence || 0.7,
           reasoning: aiResult.reasoning || `AI categorization for ${profession} in ${industry}`,
