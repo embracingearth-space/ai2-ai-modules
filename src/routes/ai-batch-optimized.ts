@@ -30,6 +30,14 @@ const router = Router();
 
 // Initialize services
 const config = getAIConfig();
+
+// 🔍 DEBUG: Check API key status
+console.log('🔑 API Key Status Check:');
+console.log('🔑 OPENAI_API_KEY exists:', !!process.env.OPENAI_API_KEY);
+console.log('🔑 OPENAI_API_KEY length:', process.env.OPENAI_API_KEY?.length || 0);
+console.log('🔑 Config apiKey exists:', !!config.apiKey);
+console.log('🔑 Config apiKey length:', config.apiKey?.length || 0);
+
 let batchEngine: BatchProcessingEngine;
 let referenceParser: ReferenceDataParser;
 
@@ -37,7 +45,10 @@ try {
   batchEngine = new BatchProcessingEngine(config);
   referenceParser = new ReferenceDataParser(config);
   
+  // 🔍 DEBUG: Check if AI agent was initialized
   console.log('🚀 Optimized AI services initialized');
+  console.log('🤖 AI Agent initialized:', !!batchEngine['aiAgent']);
+  console.log('📚 Reference Parser initialized:', !!referenceParser);
 } catch (error) {
   console.error('❌ Failed to initialize optimized AI services:', error);
 }
