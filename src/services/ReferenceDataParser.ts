@@ -43,6 +43,7 @@ export interface TransactionAnalysisResult {
   billType?: string;
   nextDueDate?: Date;
   primaryType?: string;
+  secondaryType?: string; // 🎯 ADDED: Secondary type (bill, one-time expense, etc.)
   processedAt?: string;
   estimatedFrequency?: string;
 }
