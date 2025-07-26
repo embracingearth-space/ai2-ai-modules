@@ -43,6 +43,7 @@ import aiRoutes from './routes/ai-routes-working';
 import optimizedRoutes from './routes/ai-batch-optimized';
 import simpleRoutes from './routes/ai-simple';
 import logRoutes from './routes/logs';
+import taxRoutes from './routes/ai-tax';
 
 const app = express();
 const PORT = process.env.AI_PORT || 3002;
@@ -132,6 +133,9 @@ app.use('/api/optimized', optimizedRoutes);
 
 // 🎯 SIMPLE AI ROUTES - Mount the simple categorization routes
 app.use('/api/simple', simpleRoutes);
+
+// 💰 TAX ANALYSIS ROUTES - Mount the intelligent tax deduction routes
+app.use('/api/ai-tax', taxRoutes);
 
 // 🔥 USER-SPECIFIC ANALYZE ENDPOINT - MUST BE BEFORE OTHER ROUTES
 // This handles requests like /cmd30zpi3000kp9iwwcj0w66b/analyze
