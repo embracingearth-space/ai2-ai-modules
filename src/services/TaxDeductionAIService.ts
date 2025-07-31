@@ -273,7 +273,8 @@ Respond in JSON format:
   }
 
   /**
-   * Batch analyze multiple expenses/bills for tax deductibility
+   * 🚀 ENHANCED BATCH TAX ANALYSIS WITH SIMILARITY GROUPING
+   * Process multiple expenses/bills efficiently with similarity grouping to reduce AI calls
    */
   async batchAnalyzeTaxDeductibility(
     items: Array<{
@@ -286,12 +287,19 @@ Respond in JSON format:
     }>,
     userProfile: UserTaxProfile
   ): Promise<Map<string, TaxDeductionAnalysis>> {
-    const results = new Map<string, TaxDeductionAnalysis>();
+    console.log(`🚀 Starting enhanced batch tax analysis for ${items.length} items...`);
     
-    // Process in batches of 5 to avoid rate limits
+    // Group similar items to reduce AI calls
+    const { uniqueGroups, representativeItems } = this.groupSimilarTaxItems(items);
+    
+    console.log(`🚀 Processing ${representativeItems.length} representative items (instead of ${items.length})`);
+    
+    const representativeResults = new Map<string, TaxDeductionAnalysis>();
+    
+    // Process representative items in batches to avoid rate limits
     const batchSize = 5;
-    for (let i = 0; i < items.length; i += batchSize) {
-      const batch = items.slice(i, i + batchSize);
+    for (let i = 0; i < representativeItems.length; i += batchSize) {
+      const batch = representativeItems.slice(i, i + batchSize);
       
       const batchPromises = batch.map(async (item) => {
         try {
@@ -326,16 +334,21 @@ Respond in JSON format:
 
       const batchResults = await Promise.all(batchPromises);
       batchResults.forEach(({ id, analysis }) => {
-        results.set(id, analysis);
+        representativeResults.set(id, analysis);
       });
 
       // Add delay between batches to respect rate limits
-      if (i + batchSize < items.length) {
+      if (i + batchSize < representativeItems.length) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
-
-    return results;
+    
+    // Apply results to all similar items
+    const allResults = this.applyTaxResultsToSimilarItems(representativeResults, uniqueGroups);
+    
+    console.log(`✅ Enhanced batch tax analysis completed: ${allResults.size} items processed (${representativeItems.length} AI calls)`);
+    
+    return allResults;
   }
 
   /**
@@ -670,5 +683,155 @@ Respond in JSON format:
       learningData: [],
       insights: []
     };
+  }
+
+  /**
+   * 🔍 SIMILARITY DETECTION FOR TAX ANALYSIS GROUPING
+   * Groups similar expenses/bills to reduce redundant AI calls for tax analysis
+   */
+  private groupSimilarTaxItems(
+    items: Array<{
+      id: string;
+      description: string;
+      amount: number;
+      date: Date;
+      category: string;
+      type: 'expense' | 'bill';
+    }>
+  ): {
+    uniqueGroups: Map<string, Array<{
+      id: string;
+      description: string;
+      amount: number;
+      date: Date;
+      category: string;
+      type: 'expense' | 'bill';
+    }>>;
+    representativeItems: Array<{
+      id: string;
+      description: string;
+      amount: number;
+      date: Date;
+      category: string;
+      type: 'expense' | 'bill';
+    }>;
+  } {
+    const uniqueGroups = new Map<string, Array<{
+      id: string;
+      description: string;
+      amount: number;
+      date: Date;
+      category: string;
+      type: 'expense' | 'bill';
+    }>>();
+    const representativeItems: Array<{
+      id: string;
+      description: string;
+      amount: number;
+      date: Date;
+      category: string;
+      type: 'expense' | 'bill';
+    }> = [];
+    
+    console.log(`🔍 Analyzing ${items.length} tax items for similarity grouping...`);
+    
+    for (const item of items) {
+      const normalizedDescription = this.normalizeTaxDescription(item.description);
+      const similarityKey = this.generateTaxSimilarityKey(normalizedDescription, item.amount, item.category, item.type);
+      
+      if (!uniqueGroups.has(similarityKey)) {
+        uniqueGroups.set(similarityKey, []);
+        representativeItems.push(item);
+      }
+      
+      uniqueGroups.get(similarityKey)!.push(item);
+    }
+    
+    // Log grouping results
+    const totalGroups = uniqueGroups.size;
+    const totalItems = items.length;
+    const averageGroupSize = totalItems / totalGroups;
+    const aiCallReduction = ((totalItems - totalGroups) / totalItems * 100).toFixed(1);
+    
+    console.log(`🔍 Tax similarity grouping results:`);
+    console.log(`   Total items: ${totalItems}`);
+    console.log(`   Unique groups: ${totalGroups}`);
+    console.log(`   Average group size: ${averageGroupSize.toFixed(1)}`);
+    console.log(`   AI call reduction: ${aiCallReduction}%`);
+    
+    // Log some example groups
+    let groupCount = 0;
+    for (const [key, group] of uniqueGroups.entries()) {
+      if (group.length > 1 && groupCount < 5) {
+        console.log(`   Group ${++groupCount}: "${group[0].description.substring(0, 40)}..." (${group.length} items)`);
+      }
+    }
+    
+    return { uniqueGroups, representativeItems };
+  }
+
+  /**
+   * Normalize description for tax analysis similarity comparison
+   */
+  private normalizeTaxDescription(description: string): string {
+    return description
+      .toLowerCase()
+      .replace(/[0-9\$\.\,\-\*#]+/g, '') // Remove numbers, symbols, and reference numbers
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim()
+      .substring(0, 50); // Keep first 50 chars for comparison
+  }
+
+  /**
+   * Generate similarity key for tax analysis based on description, amount, category, and type
+   */
+  private generateTaxSimilarityKey(
+    normalizedDescription: string, 
+    amount: number, 
+    category: string, 
+    type: 'expense' | 'bill'
+  ): string {
+    // Group by description, amount range (±10% tolerance), category, and type
+    const amountRange = Math.round(Math.abs(amount) / 10) * 10; // Round to nearest 10
+    return `${normalizedDescription}_${amountRange}_${category}_${type}`;
+  }
+
+  /**
+   * Apply tax analysis results from representative items to all similar items
+   */
+  private applyTaxResultsToSimilarItems(
+    representativeResults: Map<string, TaxDeductionAnalysis>,
+    uniqueGroups: Map<string, Array<{
+      id: string;
+      description: string;
+      amount: number;
+      date: Date;
+      category: string;
+      type: 'expense' | 'bill';
+    }>>
+  ): Map<string, TaxDeductionAnalysis> {
+    const allResults = new Map<string, TaxDeductionAnalysis>();
+    
+    for (const [similarityKey, group] of uniqueGroups.entries()) {
+      const representativeItem = group[0];
+      const normalizedDescription = this.normalizeTaxDescription(representativeItem.description);
+      const amountRange = Math.round(Math.abs(representativeItem.amount) / 10) * 10;
+      const key = `${normalizedDescription}_${amountRange}_${representativeItem.category}_${representativeItem.type}`;
+      
+      const representativeResult = representativeResults.get(representativeItem.id);
+      
+      if (representativeResult) {
+        // Apply the same result to all items in this group
+        for (const item of group) {
+          allResults.set(item.id, {
+            ...representativeResult,
+            reasoning: `${representativeResult.reasoning} (applied to similar item: ${item.description.substring(0, 30)}...)`
+          });
+        }
+      }
+    }
+    
+    console.log(`✅ Applied tax analysis results to ${allResults.size} items from ${representativeResults.size} representative items`);
+    return allResults;
   }
 } 
