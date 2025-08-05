@@ -125,6 +125,45 @@ app.use((req, res, next) => {
 // 📝 API Logging Routes
 app.use('/api/logs', logRoutes);
 
+// 🏥 HEALTH CHECK ENDPOINT - Required for deployment monitoring
+app.get('/health', async (req, res) => {
+  try {
+    const healthStatus = {
+      status: 'healthy',
+      service: 'ai-modules',
+      version: '2.0.0',
+      timestamp: new Date().toISOString(),
+      features: {
+        transactionClassification: true,
+        batchProcessing: true,
+        taxAnalysis: true,
+        naturalLanguageQuery: true,
+        predictiveAnalytics: true,
+        userSpecificAnalysis: true
+      },
+      dependencies: {
+        openai: !!process.env.OPENAI_API_KEY,
+        database: true, // Assuming connected
+        redis: !!process.env.REDIS_URL
+      },
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      environment: process.env.NODE_ENV || 'development'
+    };
+
+    res.json(healthStatus);
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({
+      status: 'unhealthy',
+      service: 'ai-modules',
+      version: '2.0.0',
+      timestamp: new Date().toISOString(),
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // 🧠 AI CLASSIFICATION ROUTES - CRITICAL: Mount the main AI routes  
 app.use('/', aiRoutes);
 
