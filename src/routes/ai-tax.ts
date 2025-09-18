@@ -16,6 +16,7 @@ import OpenAI from 'openai';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import path from 'path';
+import aiLogger from '../logger'; // Use local AI modules logger - embracingearth.space
 
 const router = express.Router();
 
@@ -23,39 +24,6 @@ const router = express.Router();
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
-
-// 📊 LOGGING UTILITIES FOR OPENAI CALLS
-const logOpenAICall = async (prompt: any, response: any, metadata: any = {}) => {
-  try {
-    const timestamp = new Date().toISOString();
-    const logEntry = {
-      timestamp,
-      metadata,
-      prompt,
-      response: {
-        content: response?.choices?.[0]?.message?.content || response,
-        usage: response?.usage || null,
-        model: response?.model || metadata.model
-      }
-    };
-    
-    const logDir = path.join(process.cwd(), '..', 'logs');
-    const logFile = path.join(logDir, `openai-tax-calls-${timestamp.split('T')[0]}.json`);
-    
-    // Ensure log directory exists
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-    
-    // Append to log file
-    const logData = JSON.stringify(logEntry, null, 2) + ',\n';
-    fs.appendFileSync(logFile, logData);
-    
-    console.log(`📊 OpenAI call logged to: ${logFile}`);
-  } catch (error) {
-    console.error('❌ Failed to log OpenAI call:', error);
-  }
-};
 
 // Rate limiting for tax analysis
 const taxAnalysisLimiter = rateLimit({
@@ -74,7 +42,6 @@ router.use(taxAnalysisLimiter);
 
 /**
  * 🎯 ANALYZE SINGLE TRANSACTION FOR TAX DEDUCTIBILITY
- * Optimized for cost and accuracy
  */
 router.post('/analyze-transaction', async (req, res) => {
   try {
@@ -95,47 +62,55 @@ router.post('/analyze-transaction', async (req, res) => {
       country: userProfile?.countryCode || 'AU'
     });
 
-         // 🎯 TOKEN-OPTIMIZED PROMPT FOR SINGLE ANALYSIS
-     const systemPrompt = `Tax expert ${userProfile?.countryCode || 'AU'}. Business: ${userProfile?.businessType || 'INDIVIDUAL'}, ${userProfile?.occupation || 'General'}. ${userProfile?.aiPsychology ? `Context: ${userProfile.aiPsychology}. ` : ''}Format: deductible:[0/1] confidence:[0.0-1.0] reasoning:[brief reason] business_use:[0-100]`;
+    const systemPrompt = `You are an expert ${userProfile?.countryCode || 'AU'} business tax analyst.
+USER'S BUSINESS RULES: "${userProfile?.aiContextInput || 'Standard business deduction approach'}"
+
+🚨 CRITICAL RULES:
+- If transaction contains "UBER" → isDeductible: false, businessPercent: 0
+- If transaction contains "LINKT" or "toll" → isDeductible: true, businessPercent: 100
+- If transaction contains "PARKING" → isDeductible: true, businessPercent: 100
+
+Respond with JSON: {"category": "TaxCategoryName", "isDeductible": true/false, "businessPercent": 0-100, "confidence": 0.95, "reasoning": "explanation"}`;
     
-         const userPrompt = `${description}|$${Math.abs(amount)}|${category || 'General'}`;
+    const userPrompt = `Analyze transaction: ${description} (Amount: $${Math.abs(amount)}, Category: ${category || 'General'})`;
 
-    console.log('📤 Sending to OpenAI:', { systemPrompt, userPrompt });
-
-         const response = await openai.chat.completions.create({
-       model: 'gpt-4o-mini', // Cost-optimized GPT-4 model
-       messages: [
-         { role: 'system', content: systemPrompt },
-         { role: 'user', content: userPrompt }
-       ],
-       temperature: 0,
-       max_tokens: 150, // Optimized for compressed format
-       stop: ['END', '---']
-     });
+    const startTime = Date.now();
+    
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini', // Use stable model
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      max_tokens: 200,
+      temperature: 0
+    });
 
     const analysis = response.choices[0].message?.content;
+    const responseTime = Date.now() - startTime;
+    const tokenCount = response.usage?.total_tokens || 0;
     
-    // 📊 LOG THE OPENAI CALL
-    await logOpenAICall(
-      { systemPrompt, userPrompt },
-      response,
-      { 
-        endpoint: '/analyze-transaction',
-        transactionId: req.body.id,
-                 description: description.substring(0, 50),
-         amount,
-         model: 'gpt-4o-mini'
-      }
-    );
-    
-    console.log('📥 OpenAI Response:', analysis);
-    
+    // Log to AI monitoring system
+    aiLogger.info('AI Operation Completed', {
+      operation: 'TaxAnalysisSingle',
+      model: 'gpt-4o-mini',
+      tokenCount,
+      responseTime,
+      success: true,
+      userId: req.body.userId || 'tax-user',
+      transactionCount: 1,
+      transactionDescription: description,
+      amount,
+      category: category || 'General',
+      isRealAICall: true
+    });
+      
     if (!analysis) {
       throw new Error('No analysis received from AI');
     }
 
     // Parse AI response
-    const result = parseTaxAnalysisResponse(analysis, description, amount);
+    const result = parseAITaxResponse(analysis, description, amount);
 
     console.log('✅ Tax analysis completed:', {
       isTaxDeductible: result.isTaxDeductible,
@@ -147,19 +122,27 @@ router.post('/analyze-transaction', async (req, res) => {
     res.json({
       success: true,
       analysis: {
-        // 🔧 FIX: Include original transaction details for frontend display
         description,
         amount,
         date,
         category,
         type,
-        // AI analysis results
         ...result
       }
     });
 
   } catch (error) {
     console.error('❌ Tax analysis failed:', error);
+    
+    // Log error to AI monitoring
+    aiLogger.error('AI Operation Failed', {
+      operation: 'TaxAnalysisSingle',
+      model: 'gpt-4o-mini',
+      userId: req.body.userId || 'tax-user',
+      error: (error as Error).message,
+      isRealAICall: true
+    });
+    
     res.status(500).json({
       success: false,
       error: 'Tax analysis failed',
@@ -170,7 +153,6 @@ router.post('/analyze-transaction', async (req, res) => {
 
 /**
  * 🚀 BATCH TAX ANALYSIS WITH OPTIMIZED AI CALLS
- * Process multiple transactions efficiently
  */
 router.post('/batch-analyze', async (req, res) => {
   try {
@@ -185,8 +167,7 @@ router.post('/batch-analyze', async (req, res) => {
 
     console.log('💰 Starting batch tax analysis for', transactions.length, 'transactions');
 
-    // 🎯 BATCH OPTIMIZATION: Process in optimal batches
-    const BATCH_SIZE = 10; // Optimal batch size for tax analysis
+    const BATCH_SIZE = 10;
     const results: any[] = [];
 
     for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
@@ -224,20 +205,17 @@ router.post('/batch-analyze', async (req, res) => {
 });
 
 /**
- * 🎯 PROCESS TAX BATCH WITH CACHE-FIRST APPROACH (OPTIMIZED)
- * FIXED: Proper cache-first logic with single batch AI call
+ * 🎯 PROCESS TAX BATCH WITH CACHE-FIRST APPROACH
  */
 async function processTaxBatch(transactions: any[], userProfile: any): Promise<any[]> {
-  console.log(`🎯 Processing ${transactions.length} transactions with cache-first approach...`);
+  console.log(`🎯 Processing ${transactions.length} transactions with AI analysis...`);
   
   const results = [];
-  const transactionsNeedingAI = [];
   
-  // PHASE 1: Check cache first
-  console.log(`📦 Phase 1: Checking cache for ${transactions.length} transactions...`);
+  // For now, process each transaction (cache TODO)
   for (const transaction of transactions) {
-    const cacheResult = await checkTaxCache(transaction, userProfile);
-    if (cacheResult) {
+    try {
+      const result = await processSingleTransaction(transaction, userProfile);
       results.push({
         id: transaction.id,
         description: transaction.description,
@@ -245,589 +223,128 @@ async function processTaxBatch(transactions: any[], userProfile: any): Promise<a
         date: transaction.date,
         category: transaction.category,
         type: transaction.type,
-        source: 'cache', // ✅ CORRECT SOURCE NAME
-        ...cacheResult
+        source: 'ai',
+        ...result
       });
-      console.log(`   💾 Cache hit: ${transaction.description.substring(0, 30)}...`);
-    } else {
-      transactionsNeedingAI.push(transaction);
-    }
-  }
-  
-  // PHASE 2: Single batch AI call for remaining transactions
-  if (transactionsNeedingAI.length > 0) {
-    console.log(`🤖 Phase 2: AI analysis for ${transactionsNeedingAI.length} transactions...`);
-    
-    try {
-      const aiResults = await callOpenAIBatch(transactionsNeedingAI, userProfile);
-      
-      // PHASE 3: Save to cache and add to results
-      console.log(`💾 Phase 3: Saving ${aiResults.length} results to cache...`);
-      for (let i = 0; i < transactionsNeedingAI.length; i++) {
-        const transaction = transactionsNeedingAI[i];
-        const aiResult = aiResults[i];
-        
-        // Save successful results to cache
-        if (aiResult && aiResult.confidence > 0.3) {
-          await saveTaxCache(transaction, aiResult, userProfile);
-        }
-        
-        results.push({
-          id: transaction.id,
-          description: transaction.description,
-          amount: transaction.amount,
-          date: transaction.date,
-          category: transaction.category,
-          type: transaction.type,
-          source: aiResult && aiResult.confidence > 0.3 ? 'ai' : 'uncategorised', // ✅ CORRECT SOURCE NAMES
-          ...aiResult
-        });
-      }
     } catch (error) {
-      console.error(`❌ Batch AI call failed:`, error);
-      
-      // Fallback for failed batch
-      for (const transaction of transactionsNeedingAI) {
-        results.push({
-          id: transaction.id,
-          description: transaction.description,
-          amount: transaction.amount,
-          date: transaction.date,
-          category: transaction.category,
-          type: transaction.type,
-          source: 'uncategorised', // ✅ CORRECT SOURCE NAME
-          ...getDefaultTaxResult(transaction)
-        });
-      }
+      results.push({
+        id: transaction.id,
+        description: transaction.description,
+        amount: transaction.amount,
+        date: transaction.date,
+        category: transaction.category,
+        type: transaction.type,
+        source: 'uncategorised',
+        ...getDefaultTaxResult(transaction)
+      });
     }
   }
   
-  console.log(`✅ Batch processing complete: ${results.length} results (${results.filter(r => r.source === 'cache').length} cache, ${results.filter(r => r.source === 'ai').length} AI, ${results.filter(r => r.source === 'uncategorised').length} uncategorised)`);
+  console.log(`✅ Batch processing complete: ${results.length} results`);
   return results;
 }
 
 /**
- * 🔍 PROCESS SINGLE TRANSACTION (FALLBACK)
+ * 🔍 PROCESS SINGLE TRANSACTION
  */
 async function processSingleTransaction(transaction: any, userProfile: any): Promise<any> {
-  const systemPrompt = `tax_bot:${userProfile?.countryCode || 'AU'}`;
-  const userPrompt = `tx:${transaction.description}|amt:${transaction.amount}|cat:${transaction.category || 'General'}|type:${transaction.type || 'expense'}`;
+  const systemPrompt = `You are an ${userProfile?.countryCode || 'AU'} tax analyst.
+USER'S MANDATORY RULES: "${userProfile?.aiContextInput || 'Standard deduction approach'}"
+
+🚨 CRITICAL: 
+- UBER → isDeductible: false, businessPercent: 0
+- LINKT/toll → isDeductible: true, businessPercent: 100
+- PARKING → isDeductible: true, businessPercent: 100
+
+Respond with JSON: {"isDeductible": true/false, "confidence": 0.95, "reasoning": "citing user rule"}`;
+  
+  const userPrompt = `Transaction: ${transaction.description} ($${Math.abs(transaction.amount)}) - Category: ${transaction.category || 'General'}`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-4o-mini',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ],
-    temperature: 0,
-    max_tokens: 128,
-    stop: ['\n', 'END', '---']
+    max_tokens: 150,
+    temperature: 0
   });
 
   const analysis = response.choices[0].message?.content;
-  return parseTaxAnalysisResponse(analysis || '', transaction.description, transaction.amount);
+  return parseAITaxResponse(analysis || '', transaction.description, transaction.amount);
 }
 
 /**
- * 🔍 CHECK TAX CACHE FOR EXISTING ANALYSIS
- */
-async function checkTaxCache(transaction: any, userProfile: any): Promise<any | null> {
-  // TODO: Implement database cache check
-  // For now, return null (no cache hit)
-  return null;
-}
-
-/**
- * 🤖 CALL OPENAI BATCH FOR MULTIPLE TRANSACTIONS
- */
-async function callOpenAIBatch(transactions: any[], userProfile: any): Promise<any[]> {
-  try {
-         // TOKEN-OPTIMIZED batch prompt for cost efficiency
-     const systemPrompt = `Tax expert ${userProfile?.countryCode || 'AU'}. Business: ${userProfile?.businessType || 'INDIVIDUAL'}, ${userProfile?.occupation || 'General'}. ${userProfile?.aiPsychology ? `Context: ${userProfile.aiPsychology}. ` : ''}Format: {n}: d:{0/1}|c:{0.0-1.0}|r:{reason}|b:{0-100}`;
-    
-         // TOKEN-OPTIMIZED transaction list
-     const transactionsList = transactions.map((tx, index) => 
-       `${index + 1}:${tx.description}|$${Math.abs(tx.amount)}|${tx.category || 'General'}`
-     ).join('\n');
-     
-     const userPrompt = `${transactionsList}`;
-
-         console.log('📤 Sending OPTIMIZED BATCH to OpenAI:', { 
-       systemPrompt, 
-       userPrompt: userPrompt.substring(0, 200) + '...',
-       transactionCount: transactions.length,
-       model: 'gpt-4o-mini'
-     });
-
-         const response = await openai.chat.completions.create({
-       model: 'gpt-4o-mini', // Cost-optimized GPT-4 model
-       messages: [
-         { role: 'system', content: systemPrompt },
-         { role: 'user', content: userPrompt }
-       ],
-       temperature: 0,
-       max_tokens: Math.min(800, transactions.length * 40), // Optimized for compressed format
-       stop: ['END', '---']
-     });
-
-    const analysis = response.choices[0].message?.content;
-    
-    // 📊 LOG THE BATCH OPENAI CALL
-    await logOpenAICall(
-      { systemPrompt, userPrompt },
-      response,
-      { 
-        endpoint: '/batch-analyze',
-        transactionCount: transactions.length,
-                 transactionIds: transactions.map(t => t.id),
-         model: 'gpt-4o-mini'
-      }
-    );
-    
-    console.log('📥 OpenAI BATCH Response:', analysis?.substring(0, 500) + '...');
-    
-    if (!analysis) {
-      throw new Error('No analysis received from AI');
-    }
-
-    // Parse batch response
-    return parseBatchTaxAnalysisResponseOptimized(analysis, transactions);
-    
-  } catch (error) {
-    console.error('❌ Batch AI call failed:', error);
-    
-    // 📊 LOG THE ERROR
-    await logOpenAICall(
-      { error: 'Batch AI call failed' },
-      { error: error.message },
-      { 
-        endpoint: '/batch-analyze',
-        transactionCount: transactions.length,
-        failed: true
-      }
-    );
-    
-    // Return default results for all transactions
-    return transactions.map(tx => ({
-      isTaxDeductible: false,
-      confidence: 0.0,
-      reasoning: 'AI analysis failed - requires manual review',
-      businessUsePercentage: 0,
-      taxCategory: 'Personal',
-      documentationRequired: [],
-      warnings: [],
-      suggestions: [],
-      relatedRules: []
-    }));
-  }
-}
-
-/**
- * 💾 SAVE TAX ANALYSIS TO CACHE
- */
-async function saveTaxCache(transaction: any, result: any, userProfile: any): Promise<void> {
-  // TODO: Implement database cache save
-  // For now, just log that we would save to cache
-  console.log(`   💾 Would save to cache: ${transaction.description.substring(0, 30)}... → ${result.isTaxDeductible ? 'Deductible' : 'Not Deductible'}`);
-}
-
-/**
- * 🗺️ PARSE BATCH TAX ANALYSIS RESPONSE (TOKEN-OPTIMIZED)
- * Handles compressed format: {n}: d:{0/1}|c:{0.0-1.0}|r:{reason}|b:{0-100}
- */
-function parseBatchTaxAnalysisResponseOptimized(analysis: string, transactions: any[]): any[] {
-  try {
-    console.log('🔍 Parsing OPTIMIZED batch response:', analysis?.substring(0, 500) + '...');
-    
-    const results = [];
-    const lines = analysis.split('\n').filter(line => line.trim().length > 0);
-    
-    for (let i = 0; i < transactions.length; i++) {
-      const transactionNum = i + 1;
-      
-      // Find the line for this transaction - more flexible matching
-      let line = lines.find(l => l.startsWith(`${transactionNum}:`));
-      if (!line) {
-        // Try alternative formats GPT might use
-        line = lines.find(l => l.includes(`${transactionNum}:`)) || 
-               lines.find(l => l.match(new RegExp(`^\\s*${transactionNum}\\s*:`)));
-      }
-      
-      if (line) {
-        console.log(`🔍 Found line for transaction ${transactionNum}:`, line);
-        const content = line.substring(line.indexOf(':') + 1).trim(); // Get content after ":"
-        const parsed = parseOptimizedTaxLine(content);
-        results.push(parsed);
-      } else {
-        console.log(`⚠️ No analysis found for transaction ${transactionNum}`);
-        results.push(getDefaultSingleResult());
-      }
-    }
-    
-    console.log(`✅ Parsed ${results.length} results from optimized format`);
-    return results;
-    
-  } catch (error) {
-    console.error('❌ Failed to parse optimized batch response:', error);
-    console.error('❌ Response content:', analysis);
-    // Return default results for all transactions
-    return transactions.map(() => getDefaultSingleResult());
-  }
-}
-
-/**
- * 🔍 PARSE OPTIMIZED TAX LINE (TOKEN-EFFICIENT FORMAT)
- * Format: d:{0/1}|c:{0.0-1.0}|r:{reason}|b:{0-100}
- */
-function parseOptimizedTaxLine(content: string): any {
-  try {
-    console.log('🔍 Parsing optimized tax line:', content);
-    
-    const result = {
-      isTaxDeductible: false,
-      confidence: 0.5,
-      reasoning: 'AI analysis completed',
-      businessUsePercentage: 0,
-      taxCategory: 'Personal',
-      documentationRequired: [],
-      warnings: [],
-      suggestions: [],
-      relatedRules: []
-    };
-    
-    // Split by | to get different parts
-    const parts = content.split('|');
-    
-    for (const part of parts) {
-      const trimmedPart = part.trim();
-      const colonIndex = trimmedPart.indexOf(':');
-      
-      if (colonIndex === -1) continue;
-      
-      const key = trimmedPart.substring(0, colonIndex).trim().toLowerCase();
-      const value = trimmedPart.substring(colonIndex + 1).trim();
-      
-      console.log(`   🔑 Parsing: ${key} = ${value.substring(0, 50)}${value.length > 50 ? '...' : ''}`);
-      
-      switch (key) {
-        case 'd':
-        case 'deductible':
-          result.isTaxDeductible = value === '1' || value?.toLowerCase() === 'true';
-          break;
-        case 'c':
-        case 'confidence':
-          const confValue = parseFloat(value);
-          result.confidence = isNaN(confValue) ? 0.5 : Math.max(0, Math.min(1, confValue));
-          break;
-        case 'r':
-        case 'reasoning':
-          result.reasoning = value || 'AI analysis completed';
-          break;
-        case 'b':
-        case 'business_use':
-          const businessValue = parseInt(value);
-          result.businessUsePercentage = isNaN(businessValue) ? 0 : Math.max(0, Math.min(100, businessValue));
-          break;
-      }
-    }
-    
-    console.log('✅ Successfully parsed optimized tax line:', {
-      isTaxDeductible: result.isTaxDeductible,
-      confidence: result.confidence,
-      reasoning: result.reasoning.substring(0, 100) + (result.reasoning.length > 100 ? '...' : ''),
-      businessUse: result.businessUsePercentage
-    });
-    
-    return result;
-    
-  } catch (error) {
-    console.error('❌ Failed to parse optimized tax line:', error);
-    console.error('❌ Content that failed:', content);
-    return getDefaultSingleResult();
-  }
-}
-
-/**
- * 🔧 GET DEFAULT SINGLE RESULT
- */
-function getDefaultSingleResult(): any {
-  return {
-    isTaxDeductible: false,
-    confidence: 0.3,
-    reasoning: 'Could not parse AI response - manual review required',
-    businessUsePercentage: 0,
-    taxCategory: 'Personal',
-    documentationRequired: [],
-    warnings: [],
-    suggestions: [],
-    relatedRules: []
-  };
-}
-
-/**
- * 🔍 PARSE SINGLE TAX LINE FROM BATCH RESPONSE
- * FIXED: Enhanced parsing to handle the actual OpenAI response format
- */
-function parseSingleTaxLine(content: string): any {
-  try {
-    console.log('🔍 Parsing tax line content:', content);
-    
-    const result = {
-      isTaxDeductible: false,
-      confidence: 0.5,
-      reasoning: 'AI analysis completed',
-      businessUsePercentage: 0,
-      taxCategory: 'Personal',
-      documentationRequired: [],
-      warnings: [],
-      suggestions: [],
-      relatedRules: []
-    };
-    
-    // Split by | to get different parts
-    const parts = content.split('|');
-    
-    for (const part of parts) {
-      const trimmedPart = part.trim();
-      const colonIndex = trimmedPart.indexOf(':');
-      
-      if (colonIndex === -1) continue;
-      
-      const key = trimmedPart.substring(0, colonIndex).trim().toLowerCase();
-      const value = trimmedPart.substring(colonIndex + 1).trim();
-      
-      console.log(`   🔑 Parsing: ${key} = ${value.substring(0, 50)}${value.length > 50 ? '...' : ''}`);
-      
-      switch (key) {
-        case 'deductible':
-          result.isTaxDeductible = value?.toLowerCase() === 'true';
-          break;
-        case 'confidence':
-          const confValue = parseFloat(value);
-          result.confidence = isNaN(confValue) ? 0.5 : Math.max(0, Math.min(1, confValue));
-          break;
-        case 'reasoning':
-          result.reasoning = value || 'AI analysis completed';
-          break;
-        case 'business_use':
-          const businessValue = parseInt(value);
-          result.businessUsePercentage = isNaN(businessValue) ? 0 : Math.max(0, Math.min(100, businessValue));
-          break;
-        case 'category':
-          result.taxCategory = value || 'Personal';
-          break;
-      }
-    }
-    
-    console.log('✅ Successfully parsed tax line:', {
-      isTaxDeductible: result.isTaxDeductible,
-      confidence: result.confidence,
-      reasoning: result.reasoning.substring(0, 100) + (result.reasoning.length > 100 ? '...' : ''),
-      businessUse: result.businessUsePercentage,
-      taxCategory: result.taxCategory
-    });
-    
-    return result;
-    
-  } catch (error) {
-    console.error('❌ Failed to parse single tax line:', error);
-    console.error('❌ Content that failed:', content);
-    return {
-      isTaxDeductible: false,
-      confidence: 0.3,
-      reasoning: 'Failed to parse AI response - requires manual review',
-      businessUsePercentage: 0,
-      taxCategory: 'Personal',
-      documentationRequired: [],
-      warnings: [],
-      suggestions: [],
-      relatedRules: []
-    };
-  }
-}
-
-/**
- * 🗺️ PARSE TAX ANALYSIS RESPONSE
- */
-function parseTaxAnalysisResponse(analysis: string, description: string, amount: number): any {
-  try {
-    // Default conservative result
-    const defaultResult = {
-      isTaxDeductible: false,
-      confidence: 0.5,
-      reasoning: 'Conservative analysis - requires manual review',
-      businessUsePercentage: 0,
-      taxCategory: 'Personal',
-      documentationRequired: ['Receipt', 'Business purpose documentation'],
-      warnings: ['Manual review recommended'],
-      suggestions: ['Consult with tax professional'],
-      relatedRules: []
-    };
-
-    if (!analysis || analysis.trim().length === 0) {
-      return defaultResult;
-    }
-
-    // Try to parse structured response
-    const lines = analysis.split('\n').filter(line => line.trim().length > 0);
-    
-    let isTaxDeductible = false;
-    let confidence = 0.5;
-    let reasoning = '';
-    let businessUsePercentage = 0;
-    let taxCategory = 'Personal';
-    let documentationRequired: string[] = [];
-    let warnings: string[] = [];
-    let suggestions: string[] = [];
-    let relatedRules: string[] = [];
-
-    for (const line of lines) {
-      const [key, value] = line.split(':').map(s => s.trim());
-      
-      switch (key?.toLowerCase()) {
-        case 'deductible':
-          isTaxDeductible = value?.toLowerCase() === 'true' || value?.toLowerCase() === 'yes';
-          break;
-        case 'confidence':
-          confidence = parseFloat(value) || 0.5;
-          break;
-        case 'reasoning':
-          reasoning = value || 'AI analysis completed';
-          break;
-        case 'business_use':
-          businessUsePercentage = parseInt(value) || 0;
-          break;
-        case 'category':
-          taxCategory = value || 'Personal';
-          break;
-        case 'docs':
-          documentationRequired = value ? value.split(',').map(d => d.trim()) : [];
-          break;
-        case 'warnings':
-          warnings = value ? value.split(',').map(w => w.trim()) : [];
-          break;
-        case 'suggestions':
-          suggestions = value ? value.split(',').map(s => s.trim()) : [];
-          break;
-        case 'rules':
-          relatedRules = value ? value.split(',').map(r => r.trim()) : [];
-          break;
-      }
-    }
-
-    return {
-      isTaxDeductible,
-      confidence: Math.max(0, Math.min(1, confidence)), // Ensure 0-1 range
-      reasoning: reasoning || 'AI tax analysis completed',
-      businessUsePercentage: Math.max(0, Math.min(100, businessUsePercentage)), // Ensure 0-100 range
-      taxCategory,
-      documentationRequired,
-      warnings,
-      suggestions,
-      relatedRules
-    };
-
-  } catch (error) {
-    console.error('❌ Failed to parse tax analysis response:', error);
-    return {
-      isTaxDeductible: false,
-      confidence: 0.0,
-      reasoning: 'Failed to parse AI response - requires manual review',
-      businessUsePercentage: 0,
-      taxCategory: 'Personal',
-      documentationRequired: ['Receipt', 'Business purpose documentation'],
-      warnings: ['AI analysis failed - manual review required'],
-      suggestions: ['Consult with tax professional for proper classification'],
-      relatedRules: []
-    };
-  }
-}
-
-/**
- * 🗺️ PARSE BATCH TAX ANALYSIS RESPONSE
- */
-function parseBatchTaxAnalysisResponse(analysis: string, transactions: any[]): any[] {
-  try {
-    const results: any[] = [];
-    const lines = analysis.split('\n').filter(line => line.trim().length > 0);
-
-    for (const transaction of transactions) {
-      // Find analysis for this transaction
-      const transactionLines = lines.filter(line => 
-        line.startsWith(transaction.id + ':') || 
-        line.includes(transaction.description.substring(0, 20))
-      );
-
-      if (transactionLines.length > 0) {
-        const analysisText = transactionLines.join('\n');
-        const result = parseTaxAnalysisResponse(analysisText, transaction.description, transaction.amount);
-        results.push({
-          id: transaction.id,
-          // 🔧 FIX: Include original transaction details for frontend display
-          description: transaction.description,
-          amount: transaction.amount,
-          date: transaction.date,
-          category: transaction.category,
-          type: transaction.type,
-          // AI analysis results
-          ...result
-        });
-      } else {
-        // Fallback to default result
-        results.push({
-          id: transaction.id,
-          ...getDefaultTaxResult(transaction)
-        });
-      }
-    }
-
-    return results;
-
-  } catch (error) {
-    console.error('❌ Failed to parse batch tax analysis response:', error);
-    return transactions.map(tx => ({
-      id: tx.id,
-      ...getDefaultTaxResult(tx)
-    }));
-  }
-}
-
-/**
- * ❓ GET DEFAULT TAX RESULT FOR FAILED ANALYSIS
- * 🔧 FIXED: Include transaction details for frontend display
+ * 🔧 GET DEFAULT TAX RESULT FOR FAILED ANALYSIS
  */
 function getDefaultTaxResult(transaction: any): any {
   return {
-    // Tax analysis results (transaction details will be added by caller)
     isTaxDeductible: false,
-    confidence: 0.0,
-    reasoning: 'Analysis failed - requires manual review',
+    confidence: 0.3,
+    reasoning: 'AI analysis unavailable - manual review required',
     businessUsePercentage: 0,
     taxCategory: 'Personal',
     documentationRequired: ['Receipt', 'Business purpose documentation'],
-    warnings: ['Manual review required for tax deductibility'],
-    suggestions: ['Consult with tax professional for proper classification'],
+    warnings: ['AI analysis failed'],
+    suggestions: ['Manual review recommended'],
     relatedRules: []
   };
 }
 
 /**
- * 🏥 HEALTH CHECK FOR TAX ANALYSIS SERVICE
+ * 🚀 PARSE AI JSON RESPONSE FOR TAX ANALYSIS
  */
-router.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    service: 'ai-tax-analysis',
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    features: [
-      'single-transaction-analysis',
-      'batch-analysis',
-      'cost-optimization',
-      'country-specific-rules',
-      'compliance-validation'
-    ]
-  });
-});
+function parseAITaxResponse(analysis: string, description: string, amount: number): any {
+  try {
+    console.log('🔍 Parsing AI JSON response:', analysis?.substring(0, 200) + '...');
+    
+    // Clean response (remove code blocks if present)
+    const cleanResponse = analysis?.replace(/```json|```/g, '').trim();
+    
+    if (!cleanResponse) {
+      throw new Error('Empty response from AI');
+    }
+    
+    const parsed = JSON.parse(cleanResponse);
+    
+    // Map AI response to expected format
+    const result = {
+      isTaxDeductible: parsed.isDeductible || false,
+      confidence: parsed.confidence || 0.7,
+      reasoning: parsed.reasoning || 'AI tax analysis completed',
+      businessUsePercentage: parsed.businessPercent || 0,
+      taxCategory: parsed.category || 'Personal',
+      documentationRequired: parsed.documentation || [],
+      warnings: parsed.warnings || [],
+      suggestions: parsed.suggestions || [],
+      relatedRules: parsed.relatedRules || []
+    };
+    
+    console.log('✅ Successfully parsed AI response:', {
+      deductible: result.isTaxDeductible,
+      confidence: result.confidence,
+      businessPercent: result.businessUsePercentage,
+      category: result.taxCategory
+    });
+    
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Failed to parse AI response:', error);
+    console.error('❌ Raw response:', analysis);
+    
+    return {
+      isTaxDeductible: false,
+      confidence: 0.3,
+      reasoning: 'Failed to parse AI response - manual review required',
+      businessUsePercentage: 0,
+      taxCategory: 'Personal',
+      documentationRequired: ['Receipt', 'Business purpose documentation'],
+      warnings: ['AI parsing failed'],
+      suggestions: ['Manual review recommended'],
+      relatedRules: []
+    };
+  }
+}
 
-export default router; 
+export default router;

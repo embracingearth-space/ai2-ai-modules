@@ -1,5 +1,6 @@
 import { BaseAIService, AIConfig, AIAgentTask, AIDataContext, AIAgentCapability } from './BaseAIService';
 import OpenAI from 'openai';
+import logger from '../logger'; // Use local AI modules logger - embracingearth.space
 
 export interface TransactionClassificationAnalysis {
   // Legacy fields (backward compatibility)
@@ -735,33 +736,66 @@ Respond in JSON format:
       historicalTransactions: JSON.stringify(historicalTransactions.slice(-20), null, 2)
     });
 
-    const response = await this.retryWithBackoff(async () => {
-      const completion = await this.openai.chat.completions.create({
-        model: this.config.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a financial expert specializing in transaction pattern analysis. Provide accurate classification based on historical patterns and merchant characteristics.'
-          },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: this.config.maxTokens,
-        temperature: 0.1, // Very low temperature for consistent classification
+    const startTime = Date.now();
+    
+    try {
+      const response = await this.retryWithBackoff(async () => {
+        const completion = await this.openai.chat.completions.create({
+          model: this.config.model,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a financial expert specializing in transaction pattern analysis. Provide accurate classification based on historical patterns and merchant characteristics.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: this.config.maxTokens,
+          temperature: 0.1, // Very low temperature for consistent classification
+        });
+
+        return completion;
       });
 
-      const content = completion.choices[0]?.message?.content;
+      const content = response.choices[0]?.message?.content;
       if (!content) {
         throw new Error('No response from OpenAI');
       }
 
-      try {
-        return JSON.parse(content);
-      } catch (error) {
-        throw new Error(`Failed to parse AI response: ${content}`);
-      }
-    });
+      const parsedResponse = JSON.parse(content);
+      const responseTime = Date.now() - startTime;
+      const tokenCount = response.usage?.total_tokens || 0;
 
-    return response as TransactionClassificationAnalysis;
+      // 🔗 MAXIMUM VISIBILITY: Log to AI monitoring system (embracingearth.space)
+      logger.info('AI Operation Completed', {
+        operation: 'TransactionClassification',
+        model: this.config.model,
+        tokenCount,
+        responseTime,
+        success: true,
+        userId: context.userId,
+        transactionCount: 1,
+        transactionDescription: transaction.description,
+        isRealAICall: true
+      });
+
+      return parsedResponse as TransactionClassificationAnalysis;
+
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      // 🔗 MAXIMUM VISIBILITY: Log error to AI monitoring system
+      logger.error('AI Operation Failed', {
+        operation: 'TransactionClassification',
+        model: this.config.model,
+        responseTime,
+        userId: context.userId,
+        error: (error as Error).message,
+        transactionDescription: transaction.description,
+        isRealAICall: true
+      });
+
+      throw error;
+    }
   }
 
   /**
@@ -930,27 +964,59 @@ Respond in JSON format:
       transactionData: JSON.stringify(transactions.slice(-100), null, 2) // Last 100 transactions
     });
 
-    const response = await this.retryWithBackoff(async () => {
-      const completion = await this.openai.chat.completions.create({
-        model: this.config.model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: this.config.maxTokens,
-        temperature: 0.2,
+    const startTime = Date.now();
+    
+    try {
+      const response = await this.retryWithBackoff(async () => {
+        const completion = await this.openai.chat.completions.create({
+          model: this.config.model,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: this.config.maxTokens,
+          temperature: 0.2,
+        });
+
+        return completion;
       });
 
-      const content = completion.choices[0]?.message?.content;
+      const content = response.choices[0]?.message?.content;
       if (!content) {
         throw new Error('No response from OpenAI');
       }
 
-      try {
-        return JSON.parse(content);
-      } catch (error) {
-        throw new Error(`Failed to parse AI response: ${content}`);
-      }
-    });
+      const parsedResponse = JSON.parse(content);
+      const responseTime = Date.now() - startTime;
+      const tokenCount = response.usage?.total_tokens || 0;
 
-    return response;
+      // 🔗 MAXIMUM VISIBILITY: Log to AI monitoring system (embracingearth.space)
+      logger.info('AI Operation Completed', {
+        operation: 'RecurringPatternDetection',
+        model: this.config.model,
+        tokenCount,
+        responseTime,
+        success: true,
+        userId: context.userId,
+        transactionCount: transactions.length,
+        isRealAICall: true
+      });
+
+      return parsedResponse;
+
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      // 🔗 MAXIMUM VISIBILITY: Log error to AI monitoring system
+      logger.error('AI Operation Failed', {
+        operation: 'RecurringPatternDetection',
+        model: this.config.model,
+        responseTime,
+        userId: context.userId,
+        error: (error as Error).message,
+        transactionCount: transactions.length,
+        isRealAICall: true
+      });
+
+      throw error;
+    }
   }
 
   /**
@@ -1066,6 +1132,8 @@ Respond with a JSON array, one object per transaction:
       transactions: JSON.stringify(optimizedTransactions, null, 2)
     });
 
+    const startTime = Date.now();
+    
     try {
       const response = await this.retryWithBackoff(async () => {
         const completion = await this.openai.chat.completions.create({
@@ -1081,22 +1149,49 @@ Respond with a JSON array, one object per transaction:
           temperature: 0.1, // Very low temperature for consistent categorization
         });
 
-        const content = completion.choices[0]?.message?.content;
-        if (!content) {
-          throw new Error('No response from OpenAI');
-        }
+        return completion;
+      });
 
-        try {
-          return JSON.parse(content);
-        } catch (error) {
-          throw new Error(`Failed to parse AI response: ${content}`);
-        }
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error('No response from OpenAI');
+      }
+
+      const parsedResponse = JSON.parse(content);
+      const responseTime = Date.now() - startTime;
+      const tokenCount = response.usage?.total_tokens || 0;
+
+      // 🔗 MAXIMUM VISIBILITY: Log to AI monitoring system (embracingearth.space)
+      logger.info('AI Bulk Operation Completed', {
+        operation: 'BulkCategorization',
+        model: this.config.model,
+        tokenCount,
+        responseTime,
+        success: true,
+        userId: context.userId,
+        transactionCount: transactions.length,
+        totalAmount: transactions.reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        categories: selectedCategories,
+        isRealAICall: true
       });
 
       console.log(`✅ Successfully categorized ${transactions.length} transactions`);
-      return response;
+      return parsedResponse;
 
     } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      // 🔗 MAXIMUM VISIBILITY: Log error to AI monitoring system
+      logger.error('AI Bulk Operation Failed', {
+        operation: 'BulkCategorization',
+        model: this.config.model,
+        responseTime,
+        userId: context.userId,
+        error: (error as Error).message,
+        transactionCount: transactions.length,
+        isRealAICall: true
+      });
+
       console.error('❌ Bulk categorization failed:', error);
       
       // Intelligent fallback categorization

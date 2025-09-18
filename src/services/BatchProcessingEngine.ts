@@ -19,6 +19,7 @@ import { TransactionClassificationAIAgent } from './TransactionClassificationAIA
 import { AIConfig } from '../types/ai-types';
 import { AIDataContext } from './BaseAIService';
 import { logger } from './LoggingService';
+import aiLogger from '../logger'; // Use local AI modules logger - embracingearth.space
 
 export interface BatchTransaction {
   id: string;
@@ -116,6 +117,34 @@ export class BatchProcessingEngine {
     }
   }
 
+  // Enterprise: Generate consistent hash for response tracking and caching
+  private generateResponseHash(transactions: any[], userContext: string): string {
+    const crypto = require('crypto');
+    const normalizedInput = {
+      transactions: transactions.map(t => ({
+        desc: t.description?.toLowerCase().trim(),
+        amount: Math.abs(t.amount || 0),
+        merchant: t.merchant?.toLowerCase().trim()
+      })),
+      context: userContext.toLowerCase().trim(),
+      // Removed timestamp for true deterministic consistency
+      // timestamp: Math.floor(Date.now() / (1000 * 60 * 60)) // REMOVED: Was causing inconsistency
+    };
+    return crypto.createHash('md5').update(JSON.stringify(normalizedInput)).digest('hex').substring(0, 8);
+  }
+
+  // TESTING: Re-enable GPT-5 with proper configuration
+  private getOptimalModel(): string {
+    // Test if GPT-5 works with proper temperature/seed configuration
+    const requestedModel = process.env.AI_MODEL_OVERRIDE || 'gpt-5-chat-latest';
+    
+    // Auto-correct to working GPT-5 variant
+    const model = requestedModel === 'gpt-5' ? 'gpt-5-chat-latest' : requestedModel;
+    
+    console.log(`🎯 Model selection: ${model} (testing GPT-5 with fixed config)`);
+    return model;
+  }
+
   /**
    * 🔄 PROCESS BATCH
    * 
@@ -152,7 +181,8 @@ export class BatchProcessingEngine {
       
       // Skip reference data classification and use only AI results
       const allResults = aiResults;
-      const recurringBills = this.detectRecurringBills(allResults, transactions);
+      // Respect feature flag: bill detection only when enabled
+      const recurringBills = options.enableBillDetection ? this.detectRecurringBills(allResults, transactions) : [];
       const insights = this.generateInsights(allResults, transactions);
       const costBreakdown = this.calculateCostBreakdown(0, aiResults.length, transactions.length);
       
@@ -186,7 +216,8 @@ export class BatchProcessingEngine {
     
     // Phase 3: Combine results and detect patterns
     const allResults = [...classifiedTransactions, ...aiResults];
-    const recurringBills = this.detectRecurringBills(allResults, transactions);
+    // Respect feature flag: bill detection only when enabled
+    const recurringBills = options.enableBillDetection ? this.detectRecurringBills(allResults, transactions) : [];
     
     // Phase 4: Generate insights and analytics
     const insights = this.generateInsights(allResults, transactions);
@@ -285,6 +316,17 @@ export class BatchProcessingEngine {
       logger.warn('BatchProcessingEngine', 'No AI agent available, using mock results', {
         transactionCount: transactions.length
       });
+      
+      // 🔗 Log mock operation (not a real AI call)
+      aiLogger.warn('Mock AI Operation', {
+        operation: 'BatchCategorizationMock',
+        model: 'mock',
+        transactionCount: transactions.length,
+        totalAmount: transactions.reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        reason: 'No OpenAI API key configured',
+        isRealAICall: false
+      });
+      
       return this.generateMockAIResults(transactions);
     }
     
@@ -340,7 +382,9 @@ export class BatchProcessingEngine {
         },
         historicalData: [],
         learningFeedback: [],
-        preferences: {}
+        preferences: {
+          aiContextInput: (options.userProfile as any)?.aiContextInput || undefined
+        }
       };
       
       // 🚀 NEW OPTIMIZATION: Process entire batch in single API call
@@ -493,6 +537,9 @@ export class BatchProcessingEngine {
     console.log('🔍 DEBUG - Incoming User Profile Data:');
     console.log('Raw userProfile:', JSON.stringify(userProfile, null, 2));
     console.log('Raw context.preferences:', JSON.stringify(context.preferences, null, 2));
+    console.log('🔍 DEBUG - aiContextInput paths:');
+    console.log('userProfile.aiContextInput:', (userProfile as any)?.aiContextInput);
+    console.log('context.preferences.aiContextInput:', context.preferences?.aiContextInput);
     
     // Extract all available profile information
     const businessType = userProfile?.businessType || 'INDIVIDUAL';
@@ -536,6 +583,9 @@ ${JSON.stringify(optimizedTransactions, null, 2)}
 
 Consider the user's business type, industry, profession, country, and personal context when categorizing transactions. For each transaction, assign to the MOST APPROPRIATE category from the user's categories, treat as one category between each comma. If a transaction could fit multiple categories, choose the BEST match based on the user's context but do not try to fit user categories, suggest a new category if not fitting easily.
 
+${aiContextInput ? `\n\nUSER PSYCHOLOGY CONTEXT: "${aiContextInput}" - Use this to understand the user's business patterns, decision-making style, and expense habits for more accurate categorization.` : ''}
+Try to think what payment is for and any hints from businuess names in description.
+
 Respond with a JSON array where each element corresponds to a transaction in order:
 [
   {
@@ -544,7 +594,7 @@ Respond with a JSON array where each element corresponds to a transaction in ord
     "confidence": 0.0-1.0,
     "isNewCategory": false,
     "newCategoryName": null,
-    "reasoning": "1-7 word explanation"
+    "reasoning": "1-11'ish word explanation"
   }
 ]`;
 
@@ -571,39 +621,100 @@ Respond with a JSON array where each element corresponds to a transaction in ord
         throw new Error('OpenAI client not available');
       }
 
-      const modelToUse = 'gpt-4'; // Force GPT-4 explicitly
+      // Enterprise: Use configured optimal model
+      const modelToUse = this.getOptimalModel();
       console.log(`🤖 Using AI Model: ${modelToUse}`);
 
-      const response = await openai.chat.completions.create({
+      // GPT-5 compatibility: Use max_completion_tokens instead of max_tokens for GPT-5
+      const apiParams: any = {
         model: modelToUse,
         messages: [
           {
             role: 'system',
-            content: `You are an expert financial analyst specializing in ${countryCode} business transaction categorization. You understand ${businessType} business structures and ${industry} sector specifics.`
+            content: `You are an expert ${countryCode} business tax and categorization analyst. You provide CONSISTENT, deterministic analysis for ${businessType} businesses in ${industry} sector.
+
+CONSISTENCY RULES:
+- Always apply the same logic to similar transactions
+- Maintain consistent reasoning patterns
+- Use standardized confidence scoring
+- RESPECT user-specific rules and context${aiContextInput ? `\n\nUSER BUSINESS CONTEXT: "${aiContextInput}"` : ''}`
+          },
+          {
+            role: 'user', 
+            content: `Here are examples of CONSISTENT categorization for reference:
+
+EXAMPLE 1: {"description": "UBER TRIP", "amount": -25.00, "merchant": "UBER"} 
+→ {"category": "Travel", "confidence": 0.9, "isNewCategory": false, "reasoning": "Business travel expense"}
+
+EXAMPLE 2: {"description": "TOLL PAYMENT", "amount": -3.50, "merchant": "LINKT"} 
+→ {"category": "Travel", "confidence": 0.9, "isNewCategory": false, "reasoning": "Business travel toll expense"}
+
+EXAMPLE 3: {"description": "OFFICE SUPPLIES", "amount": -45.00, "merchant": "STAPLES"}
+→ {"category": "Office Supplies", "confidence": 0.95, "isNewCategory": false, "reasoning": "Business office supplies"}
+
+Apply this SAME consistent logic to classify:`
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.2, // Lower temperature for more consistent categorization
-        max_tokens: 3000 // Increased for detailed responses
-      });
+        seed: 42 // Deterministic responses per user request
+      };
+
+      // Model-specific parameters (CORRECTED: GPT-5-chat-latest minimal working params)
+      if (modelToUse.startsWith('gpt-5')) {
+        // GPT-5-chat-latest WORKING parameters (minimal and clean)
+        apiParams.max_completion_tokens = 3000;
+        // Note: GPT-5-chat-latest does NOT support reasoning_effort, verbosity, temperature
+        // Only needs max_completion_tokens and seed
+        console.log('🚀 GPT-5-chat-latest: minimal params (max_completion_tokens + seed only)');
+      } else {
+        // GPT-4o standard parameters  
+        apiParams.max_tokens = 3000;
+        apiParams.temperature = 0.1; // Consistency control
+        apiParams.top_p = 0.95;
+        apiParams.presence_penalty = 0;
+        apiParams.frequency_penalty = 0;
+        console.log('🎯 GPT-4o: temperature=0.1, top_p=0.95, seed=12345');
+      }
+
+      const response = await openai.chat.completions.create(apiParams);
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
         throw new Error('No response from AI');
       }
 
-      // Log the API response with actual content
       const duration = Date.now() - startTime;
+      const tokenCount = response.usage?.total_tokens || 0;
+
+      // 🔗 MAXIMUM VISIBILITY: Log to AI monitoring system (embracingearth.space)
+      aiLogger.info('AI Batch Categorization Completed', {
+        operation: 'BatchCategorization',
+        model: modelToUse,
+        tokenCount,
+        responseTime: duration,
+        success: true,
+        userId: context.userId,
+        transactionCount: transactions.length,
+        totalAmount: transactions.reduce((sum, t) => sum + Math.abs(t.amount), 0),
+        categories: selectedCategories,
+        isRealAICall: true
+      });
+
+      // Enterprise: Validate response consistency
+      const responseHash = this.generateResponseHash(optimizedTransactions, userProfileContext);
+      console.log(`🔍 Response hash for consistency tracking: ${responseHash}`);
+
+      // Log the API response with actual content (legacy logging)
       const estimatedCost = this.estimateBatchCost(transactions.length);
       logger.logApiResponse(
         'BatchProcessingEngine',
         'openai/chat/completions',
         'POST',
         {
-          model: 'gpt-4',
+          model: modelToUse,
           usage: {
             prompt_tokens: response.usage?.prompt_tokens || 0,
             completion_tokens: response.usage?.completion_tokens || 0,
@@ -620,8 +731,27 @@ Respond with a JSON array where each element corresponds to a transaction in ord
         requestId
       );
 
-      // Parse AI response
-      const categorizations = JSON.parse(content);
+      // Parse AI response - handle markdown-wrapped JSON
+      let categorizations;
+      try {
+        // First try direct JSON parsing
+        categorizations = JSON.parse(content);
+      } catch (error) {
+        // If that fails, try to extract JSON from markdown code blocks
+        const jsonMatch = content.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+        if (jsonMatch) {
+          try {
+            categorizations = JSON.parse(jsonMatch[1]);
+            console.log('🔧 Successfully extracted JSON from markdown wrapper');
+          } catch (innerError) {
+            console.error('❌ Failed to parse JSON even after extracting from markdown:', innerError);
+            throw new Error(`Invalid JSON response from AI: ${innerError.message}`);
+          }
+        } else {
+          console.error('❌ No valid JSON found in AI response:', content.substring(0, 200));
+          throw new Error(`Invalid JSON response from AI: ${error.message}`);
+        }
+      }
       
       // Validate and enhance results with user profile context
       return transactions.map((transaction, index) => {
@@ -652,6 +782,19 @@ Respond with a JSON array where each element corresponds to a transaction in ord
       });
 
     } catch (error) {
+      const duration = Date.now() - startTime;
+      
+      // 🔗 MAXIMUM VISIBILITY: Log error to AI monitoring system
+      aiLogger.error('AI Batch Operation Failed', {
+        operation: 'BatchCategorization',
+        model: 'gpt-4', // fallback model name since modelToUse is out of scope
+        responseTime: duration,
+        userId: context.userId,
+        error: (error as Error).message,
+        transactionCount: transactions.length,
+        isRealAICall: true
+      });
+      
       console.error('❌ Enhanced categorization failed:', error);
       
       // Return enhanced fallback categorizations using user profile

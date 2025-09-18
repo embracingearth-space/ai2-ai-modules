@@ -15,13 +15,13 @@ import { BatchProcessingEngine } from '../services/BatchProcessingEngine';
 import { ReferenceDataParser } from '../services/ReferenceDataParser';
 import { AIConfig } from '../types/ai-types';
 
-// Initialize AI configuration
+// Initialize AI configuration (FIXED: Use consistent GPT-4o setup)
 const getAIConfig = (): AIConfig => ({
   provider: 'openai',
-  model: process.env.AI_MODEL || 'gpt-4',
+  model: process.env.AI_MODEL_OVERRIDE || 'gpt-4o', // Use GPT-4o for consistency
   apiKey: process.env.OPENAI_API_KEY || '',
   maxTokens: parseInt(process.env.AI_MAX_TOKENS || '2000'),
-  temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+  temperature: 0.1, // FIXED: Low temperature for consistency (was 0.7)
   countryCode: process.env.AI_COUNTRY_CODE || 'AU',
   language: process.env.AI_LANGUAGE || 'en'
 });
@@ -206,14 +206,16 @@ router.post('/analyze-batch', async (req: any, res: any) => {
       batchSize: options?.batchSize || 50,
       maxConcurrentBatches: options?.maxConcurrentBatches || 3,
       confidenceThreshold: options?.confidenceThreshold || 0.8,
-      enableBillDetection: options?.enableBillDetection ?? true,
+      // Categorization-first flow: bill detection disabled unless explicitly enabled
+      enableBillDetection: options?.enableBillDetection ?? false,
       enableCostOptimization: options?.enableCostOptimization ?? true,
       enableCategorization: options?.enableCategorization ?? false, // 🎯 New categorization mode
       selectedCategories: selectedCategories || [], // 🎯 Pass selected categories
       userProfile: userProfile || {
         businessType: 'SOLE_TRADER',
         industry: 'Software Services',
-        countryCode: 'AU'
+        countryCode: 'AU',
+        aiContextInput: ''
       }
     };
     
@@ -447,7 +449,8 @@ router.post('/batch-analyze', async (req: any, res: any) => {
       batchSize: options?.batchSize || 50,
       maxConcurrentBatches: options?.maxConcurrentBatches || 3,
       confidenceThreshold: options?.confidenceThreshold || 0.8,
-      enableBillDetection: options?.enableBillDetection ?? true,
+      // Alias route mirrors main setting
+      enableBillDetection: options?.enableBillDetection ?? false,
       enableCostOptimization: options?.enableCostOptimization ?? true,
       userProfile: userProfile || {
         businessType: 'SOLE_TRADER',

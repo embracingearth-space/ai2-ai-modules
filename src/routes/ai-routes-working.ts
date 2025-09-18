@@ -306,7 +306,8 @@ router.post('/classify', validateInput, async (req: any, res: any) => {
       date,
       transactions, // For batch processing
       userPreferences, // For user context
-      analysisType = 'single' // 'single', 'batch', or 'comprehensive'
+      analysisType = 'single', // 'single', 'batch', or 'comprehensive'
+      test_mode = false // 💰 COST OPTIMIZATION: Prevent real AI calls during testing
     } = req.body;
     
     // Support both single transaction and batch processing
@@ -322,6 +323,28 @@ router.post('/classify', validateInput, async (req: any, res: any) => {
     }
 
     const config = getAIConfig();
+    
+    // 💰 COST OPTIMIZATION: Test mode bypasses ALL real AI calls
+    if (test_mode) {
+      console.log('🧪 Test mode enabled - returning mock response to prevent OpenAI costs');
+      
+      let mockResponse;
+      if (isMultipleTransactions) {
+        mockResponse = await processBatchTransactionsMock(transactions, userPreferences);
+      } else {
+        mockResponse = await processSingleTransactionMock(description, amount, type, merchant, date, userPreferences);
+      }
+      
+      return res.json({
+        success: true,
+        mock: true,
+        test_mode: true,
+        cost_optimized: true,
+        ...mockResponse,
+        message: '✅ TEST MODE: Mock response to prevent OpenAI costs during health checks',
+        timestamp: new Date().toISOString()
+      });
+    }
     
     // If no OpenAI API key, return enhanced mock response
     if (!config.apiKey) {
