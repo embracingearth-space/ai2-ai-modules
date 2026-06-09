@@ -45,3 +45,8 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    ignore:
+      # Skip MAJOR version-updates — breaking changes need a deliberate,
+      # tested upgrade. Security updates still bump majors for CVEs.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
