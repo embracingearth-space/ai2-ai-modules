@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto'; // CSPRNG for request/session IDs - embracingearth.space
 
 export interface APILogEntry {
   timestamp: string;
@@ -129,7 +130,7 @@ export class APILogger {
     console.log(`   💰 Cost Estimate: $${(metadata.costEstimate || 0).toFixed(4)}`);
     console.log(`   📊 Transactions: ${metadata.transactionCount || 1}`);
     console.log(`   📝 Prompt Length: ${prompt.length} chars`);
-    console.log(`   🔑 API Key: ${config.apiKey ? config.apiKey.substring(0, 7) + '...' : 'NOT SET'}\n`);
+    console.log(`   🔑 API Key: ${config.apiKey ? '[REDACTED]' : 'NOT SET'}\n`); // never log key material - embracingearth.space
     
     return requestId;
   }
@@ -226,6 +227,12 @@ export class APILogger {
    * 📊 Generate Performance Report
    */
   generatePerformanceReport(timeRange: 'hour' | 'day' | 'week' = 'day'): any {
+    // 🔐 SECURITY: timeRange can arrive from user input (req.query cast) — allowlist it
+    // before it reaches a filesystem path; fail closed, never rewrite - embracingearth.space
+    const allowedTimeRanges: ReadonlyArray<string> = ['hour', 'day', 'week'];
+    if (!allowedTimeRanges.includes(timeRange)) {
+      throw new Error('Invalid timeRange: expected one of hour, day, week');
+    }
     const logs = this.readLogs(timeRange);
     
     const report = {
@@ -242,7 +249,14 @@ export class APILogger {
     };
 
     // Save report to file
-    const reportFile = path.join(this.logDir, `performance-report-${timeRange}.json`);
+    // 🔐 SECURITY: containment check — resolved path must stay inside the log directory
+    // (path.relative guard avoids startsWith sibling-prefix bugs) - embracingearth.space
+    const resolvedBase = path.resolve(this.logDir);
+    const reportFile = path.resolve(resolvedBase, `performance-report-${timeRange}.json`);
+    const relative = path.relative(resolvedBase, reportFile);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Invalid report path: escapes log directory');
+    }
     fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
     
     return report;
@@ -589,7 +603,7 @@ export class APILogger {
    */
   private generateRequestId(): string {
     const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8);
+    const random = crypto.randomBytes(3).toString('hex'); // CSPRNG, 6 chars - embracingearth.space
     return `req_${timestamp}_${random}`;
   }
 
@@ -598,7 +612,7 @@ export class APILogger {
    */
   private generateSessionId(): string {
     const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 10);
+    const random = crypto.randomBytes(4).toString('hex'); // CSPRNG, 8 chars - embracingearth.space
     return `session_${timestamp}_${random}`;
   }
 }
