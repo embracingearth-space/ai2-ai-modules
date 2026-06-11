@@ -114,7 +114,7 @@ jobs:
         uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51 # v3.95.5
         continue-on-error: false
         with:
-          extra_args: --only-verified --results=json
+          extra_args: --results=verified --json
           # Only flag VERIFIED secrets (reduces false positives dramatically)
           # Scans entire git history for leaked credentials
 
