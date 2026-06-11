@@ -4,6 +4,34 @@ import { LogViewer } from '../utils/LogViewer';
 
 const router = express.Router();
 
+// Allowlist for the user-supplied ?timeRange query param. Validating at the
+// route boundary lets us return 400 (client error) for bad input instead of
+// letting APILogger's internal guard throw and surface as a 500 — a generic 500
+// misclassifies a client mistake as a server fault and pollutes error
+// monitoring. APILogger keeps its own allowlist as defense-in-depth.
+// (CodeRabbit #4) embracingearth.space
+const ALLOWED_TIME_RANGES = ['hour', 'day', 'week'] as const;
+type TimeRange = (typeof ALLOWED_TIME_RANGES)[number];
+
+// Absent → default 'day'. Present-but-invalid → null (caller returns 400).
+function parseTimeRange(raw: unknown): TimeRange | null {
+  if (raw === undefined) return 'day';
+  return (ALLOWED_TIME_RANGES as readonly string[]).includes(raw as string)
+    ? (raw as TimeRange)
+    : null;
+}
+
+// res typed as any to match this repo's existing handler convention (req: any,
+// res: any) and avoid depending on the express type namespace here.
+function invalidTimeRange(res: any) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid timeRange',
+    message: `timeRange must be one of: ${ALLOWED_TIME_RANGES.join(', ')}`,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 /**
  * 📊 GET /api/logs/dashboard
  * 
@@ -11,16 +39,19 @@ const router = express.Router();
  */
 router.get('/dashboard', async (req, res) => {
   try {
-    const timeRange = req.query.timeRange as 'hour' | 'day' | 'week' || 'day';
+    const timeRange = parseTimeRange(req.query.timeRange);
+    if (timeRange === null) return invalidTimeRange(res);
     const report = apiLogger.generatePerformanceReport(timeRange);
-    
+
     res.json({
       success: true,
       data: report,
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
-    res.status(500).json({
+    // Honor a typed statusCode (e.g. APILogger's 400 ValidationError) so client
+    // errors aren't reported as 500s. embracingearth.space
+    res.status(typeof error?.statusCode === 'number' ? error.statusCode : 500).json({
       success: false,
       error: 'Failed to generate dashboard',
       message: error.message,
@@ -112,7 +143,8 @@ router.get('/detail/:requestId', async (req, res) => {
  */
 router.get('/analytics', async (req, res) => {
   try {
-    const timeRange = req.query.timeRange as 'hour' | 'day' | 'week' || 'day';
+    const timeRange = parseTimeRange(req.query.timeRange);
+    if (timeRange === null) return invalidTimeRange(res);
     const analytics = LogViewer.generateAnalytics(timeRange);
     
     res.json({
@@ -121,7 +153,7 @@ router.get('/analytics', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
-    res.status(500).json({
+    res.status(typeof error?.statusCode === 'number' ? error.statusCode : 500).json({
       success: false,
       error: 'Failed to generate analytics',
       message: error.message,

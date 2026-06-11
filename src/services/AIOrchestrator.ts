@@ -708,7 +708,8 @@ export class AIOrchestrator {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : 'No stack trace available';
       
-      console.error('❌ executeWorkflowSync failed for ' + workflowName, {
+      // user-derived value passed as arg, not format string (CodeQL js/tainted-format-string) - embracingearth.space
+      console.error('❌ executeWorkflowSync failed for %s', workflowName, {
         error: errorMessage,
         stack: errorStack
       });
@@ -763,13 +764,15 @@ export class AIOrchestrator {
       
       // At least one of description or merchant must be present
       if (!description && !merchant) {
-        console.warn(`⚠️ AIOrchestrator: Transaction ${id || index} missing both description and merchant:`, transaction);
+        // user-derived id passed as arg, not format string - embracingearth.space
+        console.warn('⚠️ AIOrchestrator: Transaction %s missing both description and merchant:', id || index, transaction);
         return false;
       }
 
       // Amount should be a number
       if (amount !== undefined && typeof amount !== 'number') {
-        console.warn(`⚠️ AIOrchestrator: Transaction ${id || index} has invalid amount:`, transaction);
+        // user-derived id passed as arg, not format string - embracingearth.space
+        console.warn('⚠️ AIOrchestrator: Transaction %s has invalid amount:', id || index, transaction);
         return false;
       }
 

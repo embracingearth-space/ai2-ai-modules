@@ -46,6 +46,35 @@ import logRoutes from './routes/logs';
 import taxRoutes from './routes/ai-tax';
 
 const app = express();
+
+// 🔐 SECURITY/OPS: behind a reverse proxy (Fly.io edge, nginx, Cloudflare) the
+// per-IP rate limiter on /logs only works if req.ip is the real client IP — else
+// express-rate-limit buckets every client under the proxy's single IP. This is
+// env-driven on purpose: blindly trusting X-Forwarded-For lets a client spoof
+// their IP and evade the limiter, so the default (unset) trusts nothing. Set
+// TRUST_PROXY to the number of proxy hops in front of this service (Fly = 1), or
+// an Express-recognized value ('loopback', a subnet, 'true'). (CodeRabbit #4)
+// embracingearth.space
+const TRUST_PROXY = process.env.TRUST_PROXY;
+if (TRUST_PROXY !== undefined && TRUST_PROXY.trim() !== '') {
+  const trimmed = TRUST_PROXY.trim();
+  const hops = Number(trimmed);
+  // Express treats boolean true/false differently from the strings 'true'/'false'
+  // — a string is parsed as an IP/subnet list and silently trusts nothing — so map
+  // the common boolean-like values explicitly; numbers become the hop count, and
+  // anything else (e.g. 'loopback', a subnet) passes through. (CodeRabbit #4)
+  // embracingearth.space
+  const trustProxy =
+    trimmed.toLowerCase() === 'true'
+      ? true
+      : trimmed.toLowerCase() === 'false'
+        ? false
+        : Number.isInteger(hops)
+          ? hops
+          : trimmed;
+  app.set('trust proxy', trustProxy);
+}
+
 const PORT = process.env.AI_PORT || 3002;
 // embracingearth.space - CF Origin Lock configuration (env-driven)
 const ORIGIN_LOCK_ENABLED = process.env.ENFORCE_CF_ORIGIN_LOCK === 'true';

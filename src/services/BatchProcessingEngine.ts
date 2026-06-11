@@ -14,6 +14,7 @@
  * - Provides comprehensive analytics and insights
  */
 
+import crypto from 'crypto'; // CSPRNG for request IDs + hashing - embracingearth.space
 import { ReferenceDataParser, TransactionAnalysisResult } from './ReferenceDataParser';
 import { TransactionClassificationAIAgent } from './TransactionClassificationAIAgent';
 import { AIConfig } from '../types/ai-types';
@@ -104,8 +105,7 @@ export class BatchProcessingEngine {
     
     // 🔍 DEBUG: Check API key and AI agent initialization
     console.log('🔧 BatchProcessingEngine Constructor:');
-    console.log('🔧 Config apiKey exists:', !!config.apiKey);
-    console.log('🔧 Config apiKey length:', config.apiKey?.length || 0);
+    console.log('🔧 Config apiKey exists:', !!config.apiKey); // presence only — never log key-derived data - embracingearth.space
     
     // Initialize AI agent if API key is available
     if (config.apiKey) {
@@ -119,7 +119,6 @@ export class BatchProcessingEngine {
 
   // Enterprise: Generate consistent hash for response tracking and caching
   private generateResponseHash(transactions: any[], userContext: string): string {
-    const crypto = require('crypto');
     const normalizedInput = {
       transactions: transactions.map(t => ({
         desc: t.description?.toLowerCase().trim(),
@@ -159,7 +158,7 @@ export class BatchProcessingEngine {
     options: BatchProcessingOptions = this.getDefaultOptions()
   ): Promise<BatchProcessingResult> {
     const startTime = Date.now();
-    const requestId = `batch-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const requestId = `batch-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`; // CSPRNG - embracingearth.space
     
     logger.info('BatchProcessingEngine', `Starting batch processing of ${transactions.length} transactions`, {
       transactionCount: transactions.length,
@@ -503,7 +502,7 @@ export class BatchProcessingEngine {
     selectedCategories: string[],
     context: AIDataContext
   ): Promise<any[]> {
-    const requestId = `categorize-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const requestId = `categorize-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`; // CSPRNG - embracingearth.space
     const startTime = Date.now();
     
     // Log the API request with actual prompt

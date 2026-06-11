@@ -5,11 +5,30 @@
  */
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { logger } from '../services/LoggingService';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const router = Router();
+
+// 🔐 SECURITY: Rate limit filesystem-backed log endpoints (CodeQL js/missing-rate-limiting) - embracingearth.space
+const logsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  // Machine-readable retry timing is emitted via the standard RateLimit-*
+  // headers (standardHeaders: true → RateLimit-Reset). The retryAfter field
+  // below is only a human-readable hint in the JSON body; with
+  // legacyHeaders: false it is intentionally NOT sent as a Retry-After header.
+  // (CodeRabbit #4) embracingearth.space
+  message: {
+    error: 'Too many log API requests, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+router.use(logsLimiter);
 
 // 🔐 SECURITY: Admin authentication middleware
 const requireAdminAuth = (req: any, res: any, next: any) => {

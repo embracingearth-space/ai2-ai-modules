@@ -33,10 +33,9 @@ const config = getAIConfig();
 
 // 🔍 DEBUG: Check API key status
 console.log('🔑 API Key Status Check:');
+// presence only — never log key-derived data (length, prefix, etc.) - embracingearth.space
 console.log('🔑 OPENAI_API_KEY exists:', !!process.env.OPENAI_API_KEY);
-console.log('🔑 OPENAI_API_KEY length:', process.env.OPENAI_API_KEY?.length || 0);
 console.log('🔑 Config apiKey exists:', !!config.apiKey);
-console.log('🔑 Config apiKey length:', config.apiKey?.length || 0);
 
 let batchEngine: BatchProcessingEngine;
 let referenceParser: ReferenceDataParser;
