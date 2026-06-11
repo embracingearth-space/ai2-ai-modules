@@ -231,7 +231,14 @@ export class APILogger {
     // before it reaches a filesystem path; fail closed, never rewrite - embracingearth.space
     const allowedTimeRanges: ReadonlyArray<string> = ['hour', 'day', 'week'];
     if (!allowedTimeRanges.includes(timeRange)) {
-      throw new Error('Invalid timeRange: expected one of hour, day, week');
+      // Typed as a 400 client error (not a generic Error → 500) so the route and
+      // error monitoring can tell bad user input apart from a server fault. The
+      // log routes also pre-validate; this is defense-in-depth. (CodeRabbit #4)
+      // embracingearth.space
+      const err: any = new Error('Invalid timeRange: expected one of hour, day, week');
+      err.statusCode = 400;
+      err.name = 'ValidationError';
+      throw err;
     }
     const logs = this.readLogs(timeRange);
     

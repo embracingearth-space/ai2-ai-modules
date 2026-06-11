@@ -16,6 +16,11 @@ const router = Router();
 const logsLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
+  // Machine-readable retry timing is emitted via the standard RateLimit-*
+  // headers (standardHeaders: true → RateLimit-Reset). The retryAfter field
+  // below is only a human-readable hint in the JSON body; with
+  // legacyHeaders: false it is intentionally NOT sent as a Retry-After header.
+  // (CodeRabbit #4) embracingearth.space
   message: {
     error: 'Too many log API requests, please try again later.',
     retryAfter: '15 minutes'

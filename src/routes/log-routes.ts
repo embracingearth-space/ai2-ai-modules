@@ -49,7 +49,9 @@ router.get('/dashboard', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
-    res.status(500).json({
+    // Honor a typed statusCode (e.g. APILogger's 400 ValidationError) so client
+    // errors aren't reported as 500s. embracingearth.space
+    res.status(typeof error?.statusCode === 'number' ? error.statusCode : 500).json({
       success: false,
       error: 'Failed to generate dashboard',
       message: error.message,
@@ -151,7 +153,7 @@ router.get('/analytics', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
-    res.status(500).json({
+    res.status(typeof error?.statusCode === 'number' ? error.statusCode : 500).json({
       success: false,
       error: 'Failed to generate analytics',
       message: error.message,
